@@ -9,7 +9,7 @@ namespace VolumetricExplosionFX.Ksp
     [KSPAddon(KSPAddon.Startup.Flight,false)]
     public sealed class FlightController : MonoBehaviour
     {
-        internal const string Version="0.9.0";
+        internal const string Version="1.0.0";
         static FlightController active;
         readonly SnapshotCache cache=new SnapshotCache();
         readonly RecentEvents recent=new RecentEvents();
@@ -57,7 +57,7 @@ namespace VolumetricExplosionFX.Ksp
                 GameEvents.onCrash.Add(OnCrash); GameEvents.onCrashSplashdown.Add(OnSplash);
                 GameEvents.onFloatingOriginShift.Add(OnOriginShift); subscribed=true;
                 nextSummary=Time.unscaledTime+5;
-                Debug.Log("[VEFX] Volumetric Explosion FX "+Version+" (private prototype) loaded in flight; Visual Only; volumetric fireballs and fires, dirt jets, splash columns, sparks, burning fragment showers, runaway boosters, re-entry breakups, lingering clouds, wreckage, residue, settings window, performance probe.");
+                Debug.Log("[VEFX] Volumetric Explosion FX "+Version+" loaded in flight.");
                 foreach(var a in AppDomain.CurrentDomain.GetAssemblies())
                     if(a.GetName().Name=="ProjectDestructionFX") Debug.LogWarning("[VEFX] An older copy of this mod (GameData/ProjectDestructionFX) is still installed: remove that folder, both together double every effect.");
                 Debug.Log("[VEFX] Supported shader selection: "+pool.ShaderSummary);
@@ -308,7 +308,7 @@ namespace VolumetricExplosionFX.Ksp
         {
             if(!overlay || pool==null) return;
             GUILayout.BeginArea(new Rect(20,80,580,400),GUI.skin.box);
-            GUILayout.Label("Volumetric Explosion FX (VEFX) "+Version+" — private prototype / Visual Only");
+            GUILayout.Label("Volumetric Explosion FX (VEFX) "+Version);
             GUILayout.Label("Alt+F8 closes this panel. Detailed log requires debug=true in Settings.cfg.");
             GUILayout.Label("Confirmed: "+confirmed+" | active FX: "+pool.Active+" | debris: "+pool.Debris+
                 " | lights: "+pool.Lights+" | culled/budget drops: "+pool.Dropped+" | queue drops: "+clusters.Dropped+" | errors: "+failures);

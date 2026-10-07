@@ -5,7 +5,7 @@ from shaders import sources_digest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 NAME='VolumetricExplosionFX'
-VERSION='0.9.0'
+VERSION='1.0.0'
 BUILD=ROOT/'build'
 def run(args):
     subprocess.run([str(x) for x in args],check=True,cwd=ROOT)
@@ -114,7 +114,7 @@ def package(args):
         receipt=json.loads((BUILD/name).read_text())
         if receipt.get('source_sha256')!=digest() or not receipt.get(key): raise RuntimeError('Rebuild/retest current source before packaging.')
     folder=BUILD/'GameData'/NAME;validate_tree(folder)
-    dest=ROOT/'dist';dest.mkdir(exist_ok=True);out=dest/(NAME+'-'+VERSION+'-private-prototype.zip')
+    dest=ROOT/'dist';dest.mkdir(exist_ok=True);out=dest/(NAME+'-'+VERSION+'.zip')
     with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
         for p in sorted(folder.rglob('*')):
             if p.is_file(): z.write(p,p.relative_to(BUILD).as_posix())
