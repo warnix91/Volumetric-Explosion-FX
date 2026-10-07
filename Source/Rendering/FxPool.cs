@@ -48,6 +48,7 @@ namespace VolumetricExplosionFX.Rendering
         bool hooked;
         void OnPreCull(Camera cam)
         {
+            CameraRig.SetRenderRange(cam);
             for(int i=0;i<slots.Length;i++) if(slots[i]!=null) slots[i].ShowFor(cam);
         }
         internal bool Spawn(EventCluster c,FxPlan plan)

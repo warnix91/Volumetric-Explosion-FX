@@ -45,6 +45,7 @@ Shader "VolumetricExplosionFX/HeroVolume"
             #pragma target 3.0
             #pragma only_renderers d3d11 glcore metal
             #include "UnityCG.cginc"
+            #include "VolumeDepth.cginc"
             UNITY_DECLARE_DEPTH_TEXTURE(_CameraDepthTexture);
             sampler3D _NoiseTex;
             sampler2D _BlueNoise;
@@ -54,7 +55,7 @@ Shader "VolumetricExplosionFX/HeroVolume"
             struct v2f { float4 vertex:SV_POSITION; float3 world:TEXCOORD0; float4 screen:TEXCOORD1; };
             v2f vert(float4 vertex:POSITION)
             {
-                v2f o; o.vertex=UnityObjectToClipPos(vertex);
+                v2f o; o.vertex=VefxProxyClip(UnityObjectToClipPos(vertex));
                 o.world=mul(unity_ObjectToWorld,vertex).xyz; o.screen=ComputeScreenPos(o.vertex); return o;
             }
             float4 N(float3 p) { return tex3Dlod(_NoiseTex,float4(p,0)); }
@@ -279,7 +280,8 @@ Shader "VolumetricExplosionFX/HeroVolume"
                 float sceneEye=LinearEyeDepth(SAMPLE_DEPTH_TEXTURE_PROJ(_CameraDepthTexture,UNITY_PROJ_COORD(i.screen)));
                 float rayEye=max(1e-4,dot(worldRay,-UNITY_MATRIX_V[2].xyz));
                 float sceneT=sceneEye/rayEye;
-                exit=min(exit,sceneT);
+                float2 range=VefxRayRange(rayEye,sceneEye);
+                entry=max(entry,range.x); exit=min(exit,range.y);
                 if(_Context.x>0.5)
                 {
                     const float clipY=-0.1;

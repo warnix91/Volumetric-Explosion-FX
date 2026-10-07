@@ -34,7 +34,7 @@ namespace VolumetricExplosionFX.Rendering
         bool FireShown { get { return fireVolume!=null&&fireVolume.Visible; } }
         internal bool HasFireVolume { get { return active&&FireShown; } }
         internal bool NeedsNearDepth { get { return active&&(volume!=null&&volume.NeedsNearDepth||FireShown&&fireTarget!=CameraRig.Far); } }
-        internal bool NeedsFarDepth { get { return active&&(volume!=null&&volume.NeedsFarDepth||FireShown&&fireTarget!=null&&fireTarget==CameraRig.Far); } }
+        internal bool NeedsFarDepth { get { return active&&(volume!=null&&volume.NeedsFarDepth||FireShown&&(fireTarget==null||fireTarget==CameraRig.Far)); } }
         FxPlan plan; EventKind kind;
         BlastLayout layout;
         ResiduePlan residue;

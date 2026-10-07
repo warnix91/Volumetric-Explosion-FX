@@ -34,6 +34,13 @@ def main():
     if core.exists(): shutil.rmtree(core)
     core.mkdir(parents=True)
     for source in list((ROOT/'Source'/'Core').glob('*.cs'))+list((ROOT/'Source'/'Unity').glob('*.cs')): shutil.copy2(source,core/source.name)
+    if not a.ui:
+        for unused in [scratch/'Assets'/'Editor'/'PreviewUi.cs',core/'SettingsPanel.cs',core/'SettingsModel.cs']:
+            if unused.exists(): unused.unlink()
+        manifest=scratch/'Packages'/'manifest.json'
+        packages=json.loads(manifest.read_text())
+        packages['dependencies'].pop('com.unity.ugui',None)
+        manifest.write_text(json.dumps(packages)+'\n')
     if a.perf:
         out=ROOT/'work'/'preview';out.mkdir(parents=True,exist_ok=True)
         env=os.environ.copy();env['VEFX_PREVIEW_OUTPUT']=str(out)

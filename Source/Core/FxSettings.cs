@@ -7,10 +7,10 @@ namespace VolumetricExplosionFX.Core
         public bool Shockwave=true;
         public bool Breakup=false;
         public bool PartDebris=true, Residue=true;
-        public Quality Quality=Quality.Medium;
-        public int MaxEvents=12, MaxDebris=768, MaxLights=3, ParticlesPerEvent=128;
-        public int MaxVolumes=4, VolumeSteps=32;
-        public int MaxDebrisParts=16, DebrisTriangles=4500;
+        public Quality Quality=Quality.Ultra;
+        public int MaxEvents=24, MaxDebris=3072, MaxLights=6, ParticlesPerEvent=256;
+        public int MaxVolumes=8, VolumeSteps=48;
+        public int MaxDebrisParts=32, DebrisTriangles=12000;
         public double ResidueSeconds=45;
         public double Distance=10000, Intensity=1, DebrisDensity=1;
         public void ApplyPreset(Quality quality)

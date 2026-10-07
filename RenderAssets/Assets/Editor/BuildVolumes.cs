@@ -93,7 +93,7 @@ public static class BuildVolumes
                 "{\"unity\":\""+Application.unityVersion+"\",\"target\":\""+platform+
                 "\",\"bundle_built\":true,\"host_render_probe\":"+host.ToString().ToLowerInvariant()+
                 ",\"graphics_api\":\""+SystemInfo.graphicsDeviceType+"\",\"ksp_test\":false}");
-            Debug.Log("[VEFX] Shader bundle and host probe passed: "+platform);
+            Debug.Log("[VEFX] Shader bundle built: "+platform+"; host render probe: "+host);
             EditorApplication.Exit(0);
         }
         catch(Exception ex) { Debug.LogError("[VEFX] "+ex); EditorApplication.Exit(1); }
@@ -112,8 +112,11 @@ public static class BuildVolumes
         var volume=GameObject.CreatePrimitive(PrimitiveType.Cube);
         UnityEngine.Object.DestroyImmediate(volume.GetComponent<Collider>());
         Mesh mesh=UnityEngine.Object.Instantiate(volume.GetComponent<MeshFilter>().sharedMesh);
-        Vector3[] vertices=mesh.vertices;for(int i=0;i<vertices.Length;i++) vertices[i]*=2;
-        mesh.vertices=vertices;mesh.RecalculateBounds();volume.GetComponent<MeshFilter>().sharedMesh=mesh;
+        mesh.Clear();
+        mesh.vertices=new[]{new Vector3(-1,-1,-1),new Vector3(1,-1,-1),new Vector3(1,1,-1),new Vector3(-1,1,-1),
+            new Vector3(-1,-1,1),new Vector3(1,-1,1),new Vector3(1,1,1),new Vector3(-1,1,1)};
+        mesh.triangles=new[]{0,2,1,0,3,2,4,5,6,4,6,7,0,4,7,0,7,3,1,2,6,1,6,5,0,1,5,0,5,4,3,7,6,3,6,2};
+        mesh.RecalculateBounds();volume.GetComponent<MeshFilter>().sharedMesh=mesh;
         var material=new Material(shader); volume.GetComponent<Renderer>().sharedMaterial=material;
         material.SetTexture("_NoiseTex",noise);
         material.SetFloat("_Steps",40);
@@ -142,7 +145,51 @@ public static class BuildVolumes
             camera.transform.position=Vector3.zero;
             if(Capture(camera,rt,image,Path.Combine(output,"probe-inside.png"))<0.001f)
                 throw new Exception("Camera-inside-volume probe failed.");
+            camera.nearClipPlane=0.21f; camera.farClipPlane=400;
             camera.transform.position=new Vector3(0,0,-5);
+            volume.transform.localScale=Vector3.one*500;
+            Shader.SetGlobalVector("_VefxClipRange",new Vector4(0.21f,397,0,0));
+            float close=Capture(camera,rt,image,Path.Combine(output,"probe-close-large.png"));
+            if(close<0.001f) throw new Exception("Large volume disappeared inside the near flight camera range.");
+            string previous=Environment.GetEnvironmentVariable("VEFX_REGRESSION_SHADER");
+            if(!string.IsNullOrEmpty(previous))
+            {
+                Shader oldShader=AssetDatabase.LoadAssetAtPath<Shader>(previous);
+                if(oldShader==null||!oldShader.isSupported) throw new Exception("Previous regression shader could not load.");
+                try
+                {
+                    material.shader=oldShader;
+                    float before=Capture(camera,rt,image,Path.Combine(output,"probe-close-before.png"));
+                    if(before>=0.001f) throw new Exception("Close camera regression was not reproduced on the previous shader.");
+                    Debug.Log("[VEFX] Close camera regression: previous="+before+", corrected="+close);
+                }
+                finally { material.shader=shader; }
+            }
+            camera.nearClipPlane=397; camera.farClipPlane=750000;
+            Shader.SetGlobalVector("_VefxClipRange",new Vector4(397,750000,0,0));
+            Capture(camera,rt,image,Path.Combine(output,"probe-close-far.png"));
+            Shader.SetGlobalVector("_VefxClipRange",Vector4.zero);
+            volume.transform.localScale=Vector3.one;
+            camera.nearClipPlane=0.05f; camera.farClipPlane=40;
+            camera.transform.position=new Vector3(0,0,-5);
+            Color[] whole=Pixels(camera,rt,image);
+            var distant=new GameObject("Split range probe camera").AddComponent<Camera>();
+            try
+            {
+                distant.CopyFrom(camera); distant.nearClipPlane=5; distant.transform.position=camera.transform.position;
+                Shader.SetGlobalVector("_VefxClipRange",new Vector4(5,40,0,0)); distant.Render();
+                camera.clearFlags=CameraClearFlags.Depth; camera.farClipPlane=5.2f;
+                Shader.SetGlobalVector("_VefxClipRange",new Vector4(0.05f,5,0,0));
+                Color[] split=Pixels(camera,rt,image);
+                File.WriteAllBytes(Path.Combine(output,"probe-camera-split.png"),image.EncodeToPNG());
+                if(Difference(whole,split)>0.01f) throw new Exception("Split flight camera compositing differs from the continuous range.");
+            }
+            finally
+            {
+                Shader.SetGlobalVector("_VefxClipRange",Vector4.zero);
+                distant.targetTexture=null; UnityEngine.Object.DestroyImmediate(distant.gameObject);
+                camera.clearFlags=CameraClearFlags.SolidColor; camera.farClipPlane=40;
+            }
             var blocker=GameObject.CreatePrimitive(PrimitiveType.Cube);
             blocker.transform.position=new Vector3(0,0,-2); blocker.transform.localScale=new Vector3(4,4,0.1f);
             try
@@ -158,6 +205,7 @@ public static class BuildVolumes
         }
         finally
         {
+            Shader.SetGlobalVector("_VefxClipRange",Vector4.zero);
             RenderTexture.active=null; camera.targetTexture=null;
             UnityEngine.Object.DestroyImmediate(volume); UnityEngine.Object.DestroyImmediate(material);
             UnityEngine.Object.DestroyImmediate(mesh);
@@ -352,6 +400,11 @@ public static class BuildVolumes
             if(Capture(camera,rt,image,Path.Combine(output,"probe-fire.png"))<0.005f) throw new Exception("Fire volume did not produce visible pixels.");
             material.SetVector("_Fire",new Vector4(0.9f,1.5f,0,0.6f));
             if(Capture(camera,rt,image,null)>0.0001f) throw new Exception("Fire volume with its fire out remained visible.");
+            camera.nearClipPlane=0.21f; camera.farClipPlane=400;
+            go.transform.localScale=Vector3.one*500;
+            material.SetVector("_Box",new Vector4(500,500,40,3)); material.SetVector("_Fire",new Vector4(350,550,1,0.6f));
+            if(Capture(camera,rt,image,Path.Combine(output,"probe-fire-inside.png"))<0.005f)
+                throw new Exception("Large ground fire disappeared around the close camera.");
         }
         finally
         {

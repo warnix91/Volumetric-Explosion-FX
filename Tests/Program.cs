@@ -84,6 +84,12 @@ class Program
         Check(new UiText(" FR_fr ").Language=="fr-fr","KSP language codes tolerate case and separator variants");
         Check(new UiText("ja-JP").Language=="ja"&&new UiText("ru-RU").Language=="ru","Japanese and Russian regional aliases resolve");
         Check(new UiText(null).Language=="en-us"&&new UiText("unknown").Language=="en-us","Unknown or unset language uses English");
+        Check(VolumeCameraRange.Select(5,500,397)==VolumeCameraSelection.Both,"A large close volume uses both flight camera ranges");
+        Check(VolumeCameraRange.Select(100,20,397)==VolumeCameraSelection.Near,"A small close volume stays on the near camera");
+        Check(VolumeCameraRange.Select(500,20,397)==VolumeCameraSelection.Far,"A distant volume stays on the far camera");
+        Check(VolumeCameraRange.Select(397,20,397)==VolumeCameraSelection.Both,"A volume crossing the camera split uses both ranges");
+        Check(VolumeCameraRange.Select(377,20,397)==VolumeCameraSelection.Both,"A volume touching the split is not lost");
+        Check(VolumeCameraRange.Select(-500,20,397)==VolumeCameraSelection.Near,"A volume behind the camera is not sent to the far camera");
         var originalCulture=System.Globalization.CultureInfo.CurrentCulture;
         var french=new UiText("fr-fr",tag=>tag=="#VEFX_Settings"?"Réglages":null);
         Check(french.Get("Settings","Settings")=="Réglages","Native KSP tags select the localized UI text");

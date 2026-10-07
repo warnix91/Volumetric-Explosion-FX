@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using UnityEngine;
+using VolumetricExplosionFX.Core;
 namespace VolumetricExplosionFX.Rendering
 {
     internal static class CameraRig
@@ -34,8 +35,15 @@ namespace VolumetricExplosionFX.Rendering
         internal static Camera Pick(Vector3 center,float reach)
         {
             if(Near==null||Far==null) return null;
-            float d=Vector3.Distance(Near.transform.position,center);
-            return d+reach<Near.farClipPlane*0.98f?Near:Far;
+            float d=Vector3.Dot(center-Near.transform.position,Near.transform.forward);
+            double split=System.Math.Min(Near.farClipPlane,Far.nearClipPlane);
+            VolumeCameraSelection selection=VolumeCameraRange.Select(d,reach,split);
+            return selection==VolumeCameraSelection.Near?Near:selection==VolumeCameraSelection.Far?Far:null;
+        }
+        internal static void SetRenderRange(Camera c)
+        {
+            float end=c==Near&&Far!=null?Mathf.Min(c.farClipPlane,Far.nearClipPlane):c!=null?c.farClipPlane:0;
+            Shader.SetGlobalVector("_VefxClipRange",IsFlight(c)?new Vector4(c.nearClipPlane,end,0,0):Vector4.zero);
         }
         internal static bool IsFlight(Camera c) { return c!=null&&(c==Near||c==Far); }
         internal static void RequestDepth(bool near,bool far)
@@ -56,6 +64,7 @@ namespace VolumetricExplosionFX.Rendering
         {
             Want(Near,false,ref addedNear); Want(Far,false,ref addedFar);
             Near=null; Far=null;
+            Shader.SetGlobalVector("_VefxClipRange",Vector4.zero);
         }
     }
 }

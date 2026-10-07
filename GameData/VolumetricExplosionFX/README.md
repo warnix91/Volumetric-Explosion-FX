@@ -14,3 +14,6 @@ Settings are saved to `PluginData/settings.cfg`.
 The interface follows the language selected in KSP.
 
 MIT licensed. Copyright (c) 2026 Warnix.
+
+Quality defaults to Ultra. Existing saved settings take precedence.
+Select a lower quality from the toolbar if needed. This release is validated on Windows.

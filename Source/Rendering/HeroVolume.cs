@@ -30,7 +30,7 @@ namespace VolumetricExplosionFX.Rendering
         internal bool Reserved { get { return admitted; } }
         internal bool Distorting { get { return showDistort; } }
         internal bool NeedsNearDepth { get { return showVolume&&Target!=CameraRig.Far||showDistort; } }
-        internal bool NeedsFarDepth { get { return showVolume&&Target!=null&&Target==CameraRig.Far; } }
+        internal bool NeedsFarDepth { get { return showVolume&&(Target==null||Target==CameraRig.Far); } }
         internal void ShowFor(Camera cam)
         {
             bool mine=CameraRig.IsFlight(cam)&&(Target==null||cam==Target);
