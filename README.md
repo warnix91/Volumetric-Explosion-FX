@@ -2,6 +2,7 @@
 
 Fireballs, smoke, visual debris, ground fires and water impacts for **KSP 1.12.5**.
 Visual effects only: gameplay and physics are unchanged.
+The interface follows the language selected in KSP.
 
 ## Installation
 

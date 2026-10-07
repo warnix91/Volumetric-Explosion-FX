@@ -307,25 +307,27 @@ namespace VolumetricExplosionFX.Ksp
         void OnGUI()
         {
             if(!overlay || pool==null) return;
-            GUILayout.BeginArea(new Rect(20,80,580,400),GUI.skin.box);
+            var text=GameText.Current;
+            GUILayout.BeginArea(new Rect(20,80,680,440),GUI.skin.box);
             GUILayout.Label("Volumetric Explosion FX (VEFX) "+Version);
-            GUILayout.Label("Alt+F8 closes this panel. Detailed log requires debug=true in Settings.cfg.");
-            GUILayout.Label("Confirmed: "+confirmed+" | active FX: "+pool.Active+" | debris: "+pool.Debris+
-                " | lights: "+pool.Lights+" | culled/budget drops: "+pool.Dropped+" | queue drops: "+clusters.Dropped+" | errors: "+failures);
-            GUILayout.Label("Spawned slots: "+pool.Spawned+" | live particles: "+pool.Particles+
-                " | camera/distance/budget drops: "+pool.NoCamera+"/"+pool.OutOfRange+"/"+pool.BudgetDrops);
-            GUILayout.Label(pool.ShaderSummary);
-            GUILayout.Label("Fireball volumes: "+pool.Volumes+" / "+settings.MaxVolumes+" | fire volumes: "+pool.FireVolumes);
-            GUILayout.Label("Part wreckage: "+pool.Wreckage);
-            GUILayout.Label("Absorbed into active domes: "+absorbed+" | stock renderers hidden/restored: "+
-                (stock!=null?stock.Suppressed+"/"+stock.Restored:"0/0"));
-            GUILayout.Label(lastEvent);
-            settings.Explosions=GUILayout.Toggle(settings.Explosions,"Enhanced explosions");
-            settings.Debris=GUILayout.Toggle(settings.Debris,"Micro debris");
-            settings.PartDebris=GUILayout.Toggle(settings.PartDebris,"Wreckage cut from the destroyed parts");
-            settings.Residue=GUILayout.Toggle(settings.Residue,"Residue: pool fires, smoke columns, scorch");
-            settings.ReplaceStockVisuals=GUILayout.Toggle(settings.ReplaceStockVisuals,"Replace matched stock destruction visuals");
-            settings.Shockwave=GUILayout.Toggle(settings.Shockwave,"Shock front and heat shimmer (refraction)");
+            GUILayout.Label(text.Get("DiagnosticsHelp","Alt+F8 closes this panel. Detailed logging: debug=true in Settings.cfg."));
+            GUILayout.Label(text.Format("Counters","Confirmed: {0} | active FX: {1} | debris: {2} | lights: {3} | culled: {4} | queue drops: {5} | errors: {6}",
+                confirmed,pool.Active,pool.Debris,pool.Lights,pool.Dropped,clusters.Dropped,failures));
+            GUILayout.Label(text.Format("ParticleCounters","Spawned: {0} | particles: {1} | camera/distance/budget drops: {2}/{3}/{4}",
+                pool.Spawned,pool.Particles,pool.NoCamera,pool.OutOfRange,pool.BudgetDrops));
+            GUILayout.Label(text.Format("Shaders","Shaders: {0}",pool.ShaderSummary));
+            GUILayout.Label(text.Format("VolumeCounters","Fireball volumes: {0} / {1} | fire volumes: {2}",pool.Volumes,settings.MaxVolumes,pool.FireVolumes));
+            GUILayout.Label(text.Format("WreckageCount","Part wreckage: {0}",pool.Wreckage));
+            GUILayout.Label(text.Format("StockCounters","Absorbed: {0} | stock visuals hidden/restored: {1}",absorbed,
+                stock!=null?stock.Suppressed+"/"+stock.Restored:"0/0"));
+            GUILayout.Label(lastEvent=="Awaiting confirmed destruction"?text.Get("AwaitingEvent","Awaiting confirmed destruction"):
+                text.Format("LastEvent","Last event: {0}",lastEvent));
+            settings.Explosions=GUILayout.Toggle(settings.Explosions,text.Get("Explosions","Explosions"));
+            settings.Debris=GUILayout.Toggle(settings.Debris,text.Get("MicroDebris","Micro debris"));
+            settings.PartDebris=GUILayout.Toggle(settings.PartDebris,text.Get("PartFragments","Part fragments"));
+            settings.Residue=GUILayout.Toggle(settings.Residue,text.Get("Residue","Ground fire and smoke"));
+            settings.ReplaceStockVisuals=GUILayout.Toggle(settings.ReplaceStockVisuals,text.Get("ReplaceStock","Replace KSP explosions"));
+            settings.Shockwave=GUILayout.Toggle(settings.Shockwave,text.Get("Shockwave","Shockwave and distortion"));
             GUILayout.EndArea();
         }
         void Fail(Exception ex)

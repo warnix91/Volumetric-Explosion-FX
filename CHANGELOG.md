@@ -6,3 +6,4 @@
 - Effects respond to vessel resources, motion and environment.
 - Adjustable quality and an explosion preview from the toolbar.
 - Visual effects only, with no required mods.
+- Interface follows KSP's language, with all nine built-in languages supported.

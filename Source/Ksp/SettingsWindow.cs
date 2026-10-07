@@ -13,6 +13,8 @@ namespace VolumetricExplosionFX.Ksp
         ApplicationLauncherButton button;
         Texture2D icon;
         SettingsPanel panel;
+        UiText text;
+        Font fallbackFont;
         bool locked, dirty, saveFailed; float saveAt, savedAt=-100, testedAt=-100;
         string testNote;
         static int lastPage;
@@ -43,6 +45,7 @@ namespace VolumetricExplosionFX.Ksp
         {
             try
             {
+                SyncLanguage();
                 if(panel==null) panel=new SettingsPanel(Model(),Font(),null,Scale());
                 panel.Page=lastPage; panel.Visible=true;
             }
@@ -55,34 +58,64 @@ namespace VolumetricExplosionFX.Ksp
             Unlock();
         }
         void CloseFromWindow() { if(button!=null) button.SetFalse(true); else Hide(); }
+        void SyncLanguage()
+        {
+            UiText selected=GameText.Current;
+            if(ReferenceEquals(text,selected)) return;
+            text=selected;
+            if(panel==null) return;
+            bool visible=panel.Visible; lastPage=panel.Page;
+            panel.Dispose(); panel=null; Unlock();
+            panel=new SettingsPanel(Model(),Font(),null,Scale());
+            panel.Page=lastPage; panel.Visible=visible;
+        }
         UiModel Model()
         {
             FxSettings s=SettingsStore.Settings;
             return SettingsModel.Build(s,new SettingsModel.Hooks {
                 Version=FlightController.Version,
+                Text=text,
                 Changed=()=>{ SettingsStore.Touch(); dirty=true; saveFailed=false; saveAt=Time.unscaledTime+1; },
                 Close=CloseFromWindow,
                 Reset=()=>{ SettingsStore.Reset(); dirty=true; saveFailed=false; saveAt=Time.unscaledTime+0.2f; },
                 CanTest=()=>FlightController.CanTest,
                 Test=kind=>{ bool ok=FlightController.Test(kind); testedAt=Time.unscaledTime;
-                    testNote=ok?"Aperçu lancé":"Aperçu indisponible ici"; return ok; },
+                    testNote=ok?"PreviewStarted":"PreviewUnavailable"; return ok; },
                 Status=Status });
         }
         string Status()
         {
             float now=Time.unscaledTime;
-            if(now-testedAt<3&&testNote!=null) return testNote;
-            if(saveFailed) return "Réglages appliqués ; enregistrement impossible";
-            if(dirty) return "Enregistrement…";
-            if(now-savedAt<3) return "Réglages enregistrés";
-            return "Appliqué aux prochains effets";
+            if(now-testedAt<3&&testNote!=null) return testNote=="PreviewStarted"?
+                text.Get("PreviewStarted","Preview started"):text.Get("PreviewUnavailable","Preview unavailable here");
+            if(saveFailed) return text.Get("SaveFailed","Settings applied; unable to save");
+            if(dirty) return text.Get("Saving","Saving…");
+            if(now-savedAt<3) return text.Get("Saved","Settings saved");
+            return text.Get("NextEffects","Applied to new effects");
         }
-        static Font Font()
+        Font Font()
         {
             Font f=HighLogic.Skin!=null?HighLogic.Skin.font:null;
             if(f==null) try { f=UnityEngine.Resources.GetBuiltinResource<Font>("Arial.ttf"); } catch(Exception) { }
             if(f==null) f=GUI.skin!=null?GUI.skin.font:null;
+            string sample=text.Get("General","General")+text.Get("Enabled","Enable effects");
+            if(HasGlyphs(f,sample)) return f;
+            try
+            {
+                if(fallbackFont==null) fallbackFont=UnityEngine.Font.CreateDynamicFontFromOSFont(new[]{
+                    "Microsoft YaHei","Meiryo","Yu Gothic","PingFang SC","Hiragino Sans",
+                    "Noto Sans CJK SC","Noto Sans CJK JP","Arial Unicode MS","DejaVu Sans","Arial"},14);
+                if(HasGlyphs(fallbackFont,sample)) return fallbackFont;
+            }
+            catch(Exception) { }
             return f;
+        }
+        static bool HasGlyphs(Font font,string sample)
+        {
+            if(font==null) return false;
+            if(font.dynamic) font.RequestCharactersInTexture(sample,14,FontStyle.Normal);
+            foreach(char c in sample) if(!char.IsWhiteSpace(c)&&!font.HasCharacter(c)) return false;
+            return true;
         }
         static float Scale() { return Mathf.Clamp(GameSettings.UI_SCALE,0.5f,2.5f); }
         protected void Update()
@@ -90,6 +123,8 @@ namespace VolumetricExplosionFX.Ksp
             if(panel==null) return;
             try
             {
+                SyncLanguage();
+                if(panel==null) return;
                 if(panel.Visible&&Input.GetKeyDown(KeyCode.Escape)) { CloseFromWindow(); return; }
                 panel.SetScale(Scale());
                 panel.Tick(Time.unscaledDeltaTime);
@@ -101,7 +136,7 @@ namespace VolumetricExplosionFX.Ksp
                 else if(!interacting&&locked) Unlock();
                 if(dirty&&!saveFailed&&Time.unscaledTime>=saveAt) SaveNow();
             }
-            catch(Exception ex) { Debug.LogError("[VEFX] Settings window: "+ex); panel.ReleaseFocus(); panel.Visible=false; Unlock(); }
+            catch(Exception ex) { Debug.LogError("[VEFX] Settings window: "+ex); if(panel!=null) { panel.ReleaseFocus(); panel.Visible=false; } Unlock(); }
         }
         void SaveNow()
         {
@@ -117,6 +152,7 @@ namespace VolumetricExplosionFX.Ksp
             if(dirty) SaveNow();
             Unlock();
             if(panel!=null) { panel.Dispose(); panel=null; }
+            if(fallbackFont!=null) { Destroy(fallbackFont); fallbackFont=null; }
             if(icon!=null) { Destroy(icon); icon=null; }
             UiArt.Release();
         }

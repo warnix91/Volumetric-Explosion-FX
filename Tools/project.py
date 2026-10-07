@@ -2,6 +2,7 @@
 """Cross-platform build/tests/package/deploy. No game binaries in Git or ZIP."""
 import argparse, hashlib, json, os, re, shutil, subprocess, sys, zipfile
 from shaders import sources_digest
+from localization import validate_localization
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 NAME='VolumetricExplosionFX'
@@ -13,7 +14,7 @@ def digest():
     h=hashlib.sha256()
     inputs=list((ROOT/'Source').rglob('*.cs'))+list((ROOT/'Tests').glob('*.cs'))+list((ROOT/'Tests').glob('*.csproj'))
     inputs+=list((ROOT/'GameData').rglob('*.cfg'))+[ROOT/'GameData'/NAME/'README.md',ROOT/'LICENSE',ROOT/'CREDITS.md',ROOT/'Tools/project.py']
-    inputs+=[p for p in (ROOT/'RenderAssets').rglob('*') if p.is_file() and p.suffix!='.meta']+[ROOT/'Tools/shaders.py']
+    inputs+=[p for p in (ROOT/'RenderAssets').rglob('*') if p.is_file() and p.suffix!='.meta']+[ROOT/'Tools/shaders.py',ROOT/'Tools/localization.py']
     for p in sorted(inputs):
         h.update(p.relative_to(ROOT).as_posix().encode()); h.update(p.read_bytes())
     return h.hexdigest()
@@ -28,6 +29,7 @@ def managed(ksp):
         if (p/'Assembly-CSharp.dll').exists() and (p/'mscorlib.dll').exists(): return p
     raise RuntimeError('KSP 1.12.5 managed assemblies not found.')
 def audit():
+    entries=validate_localization(ROOT)
     errors=[]
     forbidden=[r'\.\s*(?:AddForce|AddTorque|AddExplosionForce|RequestResource|Explode|explode|Die|decouple)\s*\(',
       r'AddComponent\s*<\s*(?:Rigidbody|\w*Collider|Part|PartModule)\s*>',
@@ -51,6 +53,7 @@ def audit():
         if re.search(r'gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|'+'-----BEGIN '+'PRIVATE KEY',content): errors.append('Possible credential in '+p.name)
     if errors: raise RuntimeError('\n'.join(errors))
     print('Source boundary/privacy audit passed (heuristic; not proof of physics equivalence).')
+    print('Localization catalogs validated:',entries,'entries across nine languages.')
 def build(args):
     audit(); data=managed(configuration(args)); out=BUILD/'GameData'/NAME/'Plugins';out.mkdir(parents=True,exist_ok=True)
     sdk=subprocess.check_output(['dotnet','--list-sdks'],text=True).strip().splitlines()[-1]
@@ -84,6 +87,11 @@ def test(args):
     (BUILD/'tests-receipt.json').write_text(json.dumps({'source_sha256':digest(),'core_tests_passed':True},indent=2)+'\n')
 def validate_tree(folder):
     expected={'Plugins/'+NAME+'.dll','Settings.cfg','README.md','LICENSE','CREDITS.md'}
+    for source in (ROOT/'GameData'/NAME/'Localization').glob('*.cfg'):
+        relative='Localization/'+source.name
+        if not (folder/relative).is_file() or (folder/relative).read_bytes()!=source.read_bytes():
+            raise RuntimeError('Packaged localization differs: '+source.name)
+        expected.add(relative)
     built=json.loads((BUILD/'build-receipt.json').read_text()).get('shader_bundles',[])
     for platform in ['windows','mac']:
         packaged=folder/'Assets'/('vefx-'+platform+'.unity3d')

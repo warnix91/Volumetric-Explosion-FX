@@ -36,26 +36,26 @@ public static class PreviewUi
             }
             var settings=new FxSettings();
             int changes=0, tests=0; bool canTest=true;
-            var hooks=new SettingsModel.Hooks { Version="0.9.0", Changed=()=>changes++, Close=()=>{ }, Reset=()=>settings.CopyFrom(new FxSettings()), CanTest=()=>canTest, Test=k=>{ tests++; return true; },
-                Status=()=>"Réglages enregistrés" };
+            var hooks=new SettingsModel.Hooks { Version="1.0.0", Changed=()=>changes++, Close=()=>{ }, Reset=()=>settings.CopyFrom(new FxSettings()), CanTest=()=>canTest, Test=k=>{ tests++; return true; },
+                Status=()=>"Settings saved" };
             var font=Resources.GetBuiltinResource<Font>("Arial.ttf");
             var panel=new SettingsPanel(SettingsModel.Build(settings,hooks),font,camera,1);
             panel.Visible=true;
             var events=new GameObject("UI probe events").AddComponent<PreviewEventSystem>();
             events.Activate(); // Editor mode does not run the play-mode event loop.
             var submit=new BaseEventData(events);
-            string general="window/viewport/page Général/";
-            var enabled=panel.Root.transform.Find(general+"row Activer les effets/checkbox").gameObject;
+            string general="window/viewport/page General/";
+            var enabled=panel.Root.transform.Find(general+"row Enable effects/checkbox").gameObject;
             ExecuteEvents.Execute(enabled,submit,ExecuteEvents.submitHandler);
             Require(!settings.Enabled&&changes==1,"checkbox keyboard submit must update the shared settings once");
             ExecuteEvents.Execute(enabled,submit,ExecuteEvents.submitHandler);
-            var quality=panel.Root.transform.Find(general+"row Qualité/option Haute").gameObject;
+            var quality=panel.Root.transform.Find(general+"row Quality/option High").gameObject;
             ExecuteEvents.Execute(quality,submit,ExecuteEvents.submitHandler);
             Require(settings.Quality==Quality.High&&settings.MaxEvents==20,"quality choice must apply its preset");
-            var intensity=panel.Root.transform.Find(general+"row Intensité/slider").GetComponent<Slider>();
+            var intensity=panel.Root.transform.Find(general+"row Intensity/slider").GetComponent<Slider>();
             intensity.value=1.63f;
             Require(Math.Abs(settings.Intensity-1.65)<0.001,"slider must snap and update the shared value");
-            var test=panel.Root.transform.Find(general+"row Explosion de test/action").gameObject;
+            var test=panel.Root.transform.Find(general+"row Test explosion/action").gameObject;
             canTest=false; panel.Tick(0);
             ExecuteEvents.Execute(test,submit,ExecuteEvents.submitHandler);
             Require(tests==0&&!test.GetComponent<Button>().interactable,"unavailable preview must stay disabled");
@@ -63,7 +63,7 @@ public static class PreviewUi
             ExecuteEvents.Execute(test,submit,ExecuteEvents.submitHandler);
             Require(tests==1,"available preview must call its hook once");
             panel.Page=4;
-            var limit=panel.Root.transform.Find("window/viewport/page Performance/row Explosions simultanées/slider").GetComponent<Slider>();
+            var limit=panel.Root.transform.Find("window/viewport/page Performance/row Simultaneous explosions/slider").GetComponent<Slider>();
             limit.value=9;
             Require(settings.Quality==Quality.Custom&&settings.MaxEvents==9,"manual limit must switch to Custom");
             settings.CopyFrom(new FxSettings());

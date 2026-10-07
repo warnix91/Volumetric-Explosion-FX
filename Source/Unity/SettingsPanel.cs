@@ -243,15 +243,20 @@ namespace VolumetricExplosionFX.Rendering
             var band=Rect("row "+row.Label,parent);
             bool longRow=row.Kind==UiRowKind.Action||row.Kind==UiRowKind.Info;
             float textW=longRow?width:row.Kind==UiRowKind.Toggle?width-40:controlLeft-12;
-            At(Label("label",band,row.Label,13,FontStyle.Normal,Ink).rectTransform,0,-7,textW,20);
+            var label=Label("label",band,row.Label,13,FontStyle.Normal,Ink);
+            label.horizontalOverflow=HorizontalWrapMode.Wrap;
+            At(label.rectTransform,0,-7,textW,20);
+            float labelH=Mathf.Max(20,Mathf.Ceil(label.preferredHeight));
+            label.rectTransform.sizeDelta=new Vector2(textW,labelH);
+            float bodyTop=7+labelH;
             float hintH=0;
             if(!string.IsNullOrEmpty(row.Hint))
             {
                 var hint=Label("hint",band,row.Hint,10,FontStyle.Normal,Soft); hint.horizontalOverflow=HorizontalWrapMode.Wrap;
-                At(hint.rectTransform,0,-27,textW,16); hintH=Mathf.Ceil(hint.preferredHeight);
+                At(hint.rectTransform,0,-bodyTop,textW,16); hintH=Mathf.Ceil(hint.preferredHeight);
                 hint.rectTransform.sizeDelta=new Vector2(textW,hintH);
             }
-            float height=Mathf.Max(44,27+hintH+8);
+            float height=Mathf.Max(44,bodyTop+hintH+8);
             var selectables=new List<Selectable>();
             switch(row.Kind)
             {
@@ -274,7 +279,7 @@ namespace VolumetricExplosionFX.Rendering
                 { Choices(row,band,controlLeft,8,Controls,refresh,selectables); break; }
                 case UiRowKind.Action:
                 {
-                    float top=27+hintH+8;
+                    float top=bodyTop+hintH+8;
                     Choices(row,band,0,top,width-92,refresh,selectables);
                     Button b=Button("action",band,row.Button,()=>{ if(Available(row)&&row.Click!=null) row.Click(); });
                     At(b.GetComponent<RectTransform>(),width-82,-top,82,27); selectables.Add(b); height=top+35; break;
@@ -282,7 +287,7 @@ namespace VolumetricExplosionFX.Rendering
                 default:
                 {
                     var text=Label("info",band,row.Text!=null?row.Text():"",11,FontStyle.Normal,Soft); text.horizontalOverflow=HorizontalWrapMode.Wrap;
-                    float top=27+hintH; At(text.rectTransform,0,-top,width,16);
+                    float top=bodyTop+hintH; At(text.rectTransform,0,-top,width,16);
                     float h=Mathf.Ceil(text.preferredHeight)+4; text.rectTransform.sizeDelta=new Vector2(width,h); height=top+h+8;
                     refresh.Add(()=>{ if(row.Text!=null) TextIfChanged(text,row.Text()); }); break;
                 }

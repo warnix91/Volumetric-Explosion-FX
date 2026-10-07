@@ -11,5 +11,6 @@ To uninstall, remove `GameData/VolumetricExplosionFX`.
 
 Use the flame toolbar button in flight or at the Space Center.
 Settings are saved to `PluginData/settings.cfg`.
+The interface follows the language selected in KSP.
 
 MIT licensed. Copyright (c) 2026 Warnix.

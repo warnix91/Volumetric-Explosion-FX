@@ -76,10 +76,39 @@ class Program
             if((cut.Positions[cut.Triangles[3*a+i]]-cut.Positions[cut.Triangles[3*b+j]]).Length<1e-9) return true;
         return false;
     }
+    static void LocalizationChecks()
+    {
+        string[] languages={"en-us","fr-fr","de-de","es-es","it-it","pt-br","ru","ja","zh-cn"};
+        foreach(string language in languages)
+            Check(new UiText(language).Language==language,"KSP language recognized: "+language);
+        Check(new UiText(" FR_fr ").Language=="fr-fr","KSP language codes tolerate case and separator variants");
+        Check(new UiText("ja-JP").Language=="ja"&&new UiText("ru-RU").Language=="ru","Japanese and Russian regional aliases resolve");
+        Check(new UiText(null).Language=="en-us"&&new UiText("unknown").Language=="en-us","Unknown or unset language uses English");
+        var originalCulture=System.Globalization.CultureInfo.CurrentCulture;
+        var french=new UiText("fr-fr",tag=>tag=="#VEFX_Settings"?"Réglages":null);
+        Check(french.Get("Settings","Settings")=="Réglages","Native KSP tags select the localized UI text");
+        Check(french.Get("Missing","English fallback")=="English fallback","Missing translations use readable English");
+        Check(new UiText("fr-fr",tag=>tag).Get("Settings","Settings")=="Settings","Unresolved tags are never shown as labels");
+        Check(new UiText("fr-fr",tag=>"").Get("Settings","Settings")=="Settings","Empty translations use English");
+        Check((1.25).ToString("0.00",french.Culture)=="1,25"&&(1.25).ToString("0.00",new UiText("en-us").Culture)=="1.25",
+            "Numbers follow the game language rather than the operating system");
+        Check(System.Globalization.CultureInfo.CurrentCulture.Equals(originalCulture),"UI localization does not change another mod's culture");
+        int lookups=0;
+        var cached=new UiText("ja",tag=>{ lookups++; return "設定"; });
+        Check(cached.Get("Settings","Settings")=="設定"&&cached.Get("Settings","Settings")=="設定"&&lookups==1,
+            "Localized Unicode labels are cached without repeated dictionary lookups");
+        var format=new UiText("fr-fr",tag=>"Profil : <<1>> / <<2>>");
+        Check(format.Format("Preset","Preset: {0} / {1}","Haute",1.5)=="Profil : Haute / 1,5",
+            "KSP numbered localization arguments preserve localized numbers");
+        Check(new UiText("en-us",tag=>"Broken {9}").Format("Value","Value: {0}",7)=="Value: 7",
+            "Malformed translated formatting does not break the settings window");
+        Check(new UiText("fr-fr").Format("Value","Value: {0}",1.5)=="Value: 1,5","Fallback messages retain the selected numeric culture");
+    }
     static void Main()
     {
         try
         {
+            LocalizationChecks();
             var c=new ResourceClassifier();
             var full=new[]{R("LiquidFuel",100),R("Oxidizer",100)};
             var air=Plan(Part(1.225,full)); var vacuum=Plan(Part(0,full));
