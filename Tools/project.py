@@ -12,7 +12,7 @@ def run(args):
     subprocess.run([str(x) for x in args],check=True,cwd=ROOT)
 def digest():
     h=hashlib.sha256()
-    inputs=list((ROOT/'Source').rglob('*.cs'))+list((ROOT/'Tests').glob('*.cs'))+list((ROOT/'Tests').glob('*.csproj'))
+    inputs=list((ROOT/'Source').rglob('*.cs'))+list((ROOT/'Tests').glob('*.cs'))+list((ROOT/'Tests').glob('*.csproj'))+list((ROOT/'Tests').glob('test_*.py'))
     inputs+=list((ROOT/'GameData').rglob('*.cfg'))+[ROOT/'GameData'/NAME/'README.md',ROOT/'LICENSE',ROOT/'CREDITS.md',ROOT/'Tools/project.py']
     inputs+=[p for p in (ROOT/'RenderAssets').rglob('*') if p.is_file() and p.suffix!='.meta']+[ROOT/'Tools/shaders.py',ROOT/'Tools/localization.py']
     for p in sorted(inputs):
@@ -81,6 +81,7 @@ def build(args):
     print('Built plugin against actual KSP assemblies. No dependency DLLs copied.')
 def test(args):
     audit()
+    run([sys.executable,'-m','unittest','discover','-s','Tests','-p','test_*.py'])
     # No NuGet packages or mock Unity runtime. Core source compiled and exercised on .NET.
     run(['dotnet','run','--project','Tests/VolumetricExplosionFX.Tests.csproj','--configuration','Release'])
     BUILD.mkdir(exist_ok=True)
@@ -116,22 +117,42 @@ def verified_bundle(platform):
     if bundle.read_bytes()[:7]!=b'UnityFS' or hashlib.sha256(bundle.read_bytes()).hexdigest()!=data.get('sha256'):
         raise RuntimeError('Shader bundle checksum/format failed.')
     return bundle
+def require_distribution_bundle(platform, require_host_probe=True):
+    bundle=verified_bundle(platform)
+    if bundle is None:
+        raise RuntimeError('Missing '+platform+' shaders. Build them with Tools/shaders.py before creating a distribution package.')
+    receipt=json.loads((BUILD/'shader-bundles'/platform/'receipt.json').read_text())
+    api='Direct3D11' if platform=='windows' else 'OpenGLCore'
+    if require_host_probe and (not receipt.get('host_render_probe') or receipt.get('graphics_api')!=api):
+        raise RuntimeError('Verify '+platform+' shaders on a '+api+' host before distribution.')
+
 def package(args):
     audit()
+    private_test=getattr(args,'test_package',False)
+    platform=getattr(args,'platform','windows')
+    candidate=getattr(args,'candidate',False)
+    if private_test and candidate: raise RuntimeError('Choose candidate or private test packaging.')
+    if not private_test:
+        require_distribution_bundle(platform, require_host_probe=not candidate)
     for name,key in [('build-receipt.json','actual_ksp_assembly_build'),('tests-receipt.json','core_tests_passed')]:
         receipt=json.loads((BUILD/name).read_text())
         if receipt.get('source_sha256')!=digest() or not receipt.get(key): raise RuntimeError('Rebuild/retest current source before packaging.')
     folder=BUILD/'GameData'/NAME;validate_tree(folder)
-    dest=ROOT/'dist';dest.mkdir(exist_ok=True);out=dest/(NAME+'-'+VERSION+'.zip')
+    bundled=json.loads((BUILD/'build-receipt.json').read_text())['shader_bundles']
+    if not private_test and platform not in bundled:
+        raise RuntimeError('Rebuild the plugin after compiling the '+platform+' shaders.')
+    suffix=('-'+platform+'-private-test') if private_test else ('-'+platform+'-candidate' if candidate else ('-mac' if platform=='mac' else ''))
+    dest=ROOT/'dist';dest.mkdir(exist_ok=True);out=dest/(NAME+'-'+VERSION+suffix+'.zip')
     with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
         for p in sorted(folder.rglob('*')):
             if p.is_file(): z.write(p,p.relative_to(BUILD).as_posix())
     with zipfile.ZipFile(out) as z:
         if z.testzip() is not None: raise RuntimeError('ZIP checksum validation failed')
     (dest/'package-validation.json').write_text(json.dumps({'package':out.name,'sha256':hashlib.sha256(out.read_bytes()).hexdigest(),'source_sha256':digest(),
-      'package_verified':True,'shader_bundles':json.loads((BUILD/'build-receipt.json').read_text())['shader_bundles'],
+      'package_verified':True,'package_kind':'private-test' if private_test else 'distribution-candidate','target':platform,'shader_bundles':bundled,'release_ready':False,
+      'target_host_probe_verified':False if private_test else json.loads((BUILD/'shader-bundles'/platform/'receipt.json').read_text()).get('host_render_probe',False),
       'loaded_in_ksp':False,'visually_tested_in_ksp':False,'performance_tested':False},indent=2)+'\n')
-    print('Validated test package:',out.name)
+    print('Validated '+('private test' if private_test else 'distribution candidate')+' package:',out.name)
 def deploy(args):
     # Deliberate opt-in; never overwrite other mods or saves. Backup only our old DLL/config.
     ksp=configuration(args);managed(ksp);src=BUILD/'GameData'/NAME;validate_tree(src)
@@ -150,6 +171,10 @@ def collect(args):
     out.write_text(content+'\n');print('Project-only redacted log summary saved in ignored work/.')
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('action',choices=['build','test','audit','package','deploy','collect']);parser.add_argument('--ksp-root')
+    mode=parser.add_mutually_exclusive_group()
+    mode.add_argument('--test-package',action='store_true',help='Explicit private test ZIP; may omit volumetric shaders.')
+    mode.add_argument('--candidate',action='store_true',help='Complete private candidate with current shaders; target-host and KSP acceptance may be pending.')
+    parser.add_argument('--platform',choices=['windows','mac'],default='windows')
     args=parser.parse_args()
     try: {'build':build,'test':test,'audit':lambda _:audit(),'package':package,'deploy':deploy,'collect':collect}[args.action](args)
     except (RuntimeError,subprocess.CalledProcessError,FileNotFoundError) as e:

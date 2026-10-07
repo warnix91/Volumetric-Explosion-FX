@@ -79,7 +79,7 @@ def main():
     log=ROOT/'work'/('unity-'+a.target+'.log')
     # Do not pass -nographics: Unity can omit shader variants on that path.
     subprocess.run([editor,'-batchmode','-projectPath',str(scratch),'-executeMethod','BuildVolumes.Build',
-        '-logFile',str(log)],env=env,check=True,cwd=ROOT)
+        '-logFile',str(log)]+(['-force-d3d11'] if os.name=='nt' and a.target=='windows' else ['-force-glcore']),env=env,check=True,cwd=ROOT)
     if not validation.exists(): raise RuntimeError('Unity did not produce validation; inspect ignored work/Unity log (license or compilation failure).')
     result=json.loads(validation.read_text())
     bundle=output/('vefx-'+a.target+'.unity3d')
