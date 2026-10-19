@@ -10,6 +10,19 @@ namespace VolumetricExplosionFX.Core
         public bool Ground;
         public Vec3 GroundPoint;
         double groundScore;
+        // One event on its own, spawned at once (a combat mod's detonation: no waiting window, never merged or dropped).
+        public static EventCluster Single(int id,DestructionEvent e,double score)
+        {
+            var c=new EventCluster { Id=id, Members=1, Representative=e, Position=e.Part.Position, FirstTime=e.Time, LastTime=e.Time, TotalScore=score, RepresentativeScore=score };
+            c.Note(e,score);
+            return c;
+        }
+        // Floating-origin shift of the positions the cluster holds.
+        public void Shift(Vec3 offset)
+        {
+            Position-=offset; GroundPoint-=offset;
+            for(int k=0;k<SampleCount;k++) SamplePositions[k]-=offset;
+        }
         internal void Note(DestructionEvent e,double score)
         {
             if(e.Kind!=EventKind.GroundImpact || Ground&&score<=groundScore) return;
@@ -84,11 +97,7 @@ namespace VolumetricExplosionFX.Core
         }
         public void Shift(Vec3 offset)
         {
-            for(int i=0;i<slots.Length;i++) if(slots[i]!=null)
-            {
-                slots[i].Position-=offset; slots[i].GroundPoint-=offset;
-                for(int k=0;k<slots[i].SampleCount;k++) slots[i].SamplePositions[k]-=offset;
-            }
+            for(int i=0;i<slots.Length;i++) if(slots[i]!=null) slots[i].Shift(offset);
         }
         public void Clear() { Array.Clear(slots,0,slots.Length); }
     }

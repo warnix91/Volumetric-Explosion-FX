@@ -8,6 +8,8 @@ Shader "VolumetricExplosionFX/FireVolume"
         _Fire ("Pool radius (m), flame height (m), fire level, puffing (Hz)", Vector) = (4,12,1,0.5)
         _Lean ("Downwind lean per metre of height (x, z), rise (flame heights per second), flicker", Vector) = (0,0,0.7,1)
         _Intensity ("Emission", Float) = 1
+        _Patchy ("Separate flames over the spill (0 = one pool fire)", Float) = 0
+        _Streak ("Burning strip along +x: length (m), box centre offset (m), half width (m) (0 = round pool)", Vector) = (0,0,0,0)
     }
     SubShader
     {
@@ -26,8 +28,9 @@ Shader "VolumetricExplosionFX/FireVolume"
             UNITY_DECLARE_DEPTH_TEXTURE(_CameraDepthTexture);
             sampler3D _NoiseTex;
             sampler2D _BlueNoise;
-            float4 _Box, _Fire, _Lean;
-            float _Intensity;
+            float4 _Box, _Fire, _Lean, _Streak;
+            float _Intensity, _Patchy;
+            float4 _Blobs[8];   // pools along a crash path: along (m), across (m), radius (m), flame height (share)
             struct v2f { float4 vertex:SV_POSITION; float3 world:TEXCOORD0; float4 screen:TEXCOORD1; };
             v2f vert(float4 vertex:POSITION)
             {
@@ -50,8 +53,37 @@ Shader "VolumetricExplosionFX/FireVolume"
                 if(y<0||y>1.8) return 0;
                 float2 hz=m.xz-_Lean.xy*m.y;
                 float rad=length(hz)/R;
+                if(_Streak.x>0)
+                {
+                    // Along a crash path: pools of burning fuel scattered along it, each its own size and flame
+                    // height, the path wandering, gaps between them; each catches as the spreading fire reaches it. (A straight
+                    // band of even fire read as fake.)
+                    float best=1e6, tallest=1, size=R;
+                    [unroll] for(int k=0;k<8;k++)
+                    {
+                        float4 B=_Blobs[k];
+                        if(B.z<=0||B.x>_Streak.x+0.01) continue;
+                        float dd=length(hz-B.xy)/B.z;
+                        if(dd<best) { best=dd; tallest=B.w*(k==0?1:saturate((_Streak.x-B.x)/(B.z*1.5)+0.15)); size=B.z; }
+                    }
+                    if(best>1.5||tallest<0.03) return 0;
+                    rad=best; R=size;
+                    y=m.y/(L*tallest);
+                    if(y>1.8) return 0;
+                }
                 if(rad>1.5) return 0;
                 float t=_Time.y*_Lean.z, s=_Box.w;
+                float tall=1;
+                if(_Patchy>0)
+                {
+                    // Burning patches of spilled fuel: each patch has its own flame height, gaps between them.
+                    float4 pn=tex3D(_NoiseTex,float3(hz.x/R*0.42+s,0.37+s*0.21,hz.y/R*0.42-s));
+                    float patch=saturate((pn.r-0.3)*3.2);
+                    tall=lerp(1,(0.45+0.85*pn.g)*patch,_Patchy);
+                    if(tall<0.03) return 0;
+                    y/=tall;
+                    if(y>1.8) return 0;
+                }
                 float3 q=float3(hz.x/R,y*1.1-t,hz.y/R)+s;
                 float4 e=tex3D(_NoiseTex,q*float3(0.35,0.3,0.35));
                 float3 w=(e.rgb-0.5)*float3(1.1,0.5,1.1);
@@ -62,7 +94,7 @@ Shader "VolumetricExplosionFX/FireVolume"
                 float env=saturate((width-rad+(w.x+w.z)*0.15)/(0.35*width+0.05));
                 float puff=sin(6.2832*(_Fire.w*_Time.y-y*1.3)+e.b*5)*0.5+0.5;
                 float thresh=lerp(0.12,0.85,saturate(y/1.35))-puff*0.18*saturate(y*2)+(1-env)*0.6;
-                float D=saturate((turb-thresh)*4.5)*_Fire.z;
+                float D=saturate((turb-thresh)*3.2)*_Fire.z;
                 heat=saturate(((1.1-0.5*y)*(0.8+0.32*b.b)+0.15*(turb-0.5))*(0.5+0.5*saturate(D*2.2))*(0.75+0.25*_Fire.z));
                 return D;
             }
@@ -90,7 +122,7 @@ Shader "VolumetricExplosionFX/FireVolume"
                     if(k>=steps||T<0.02) break;
                     float t=entry+(k+jitter)*dt;
                     float3 P=o+d*t;
-                    float3 m=float3(P.x*_Box.x,(P.y+1)*_Box.y,P.z*_Box.x);
+                    float3 m=float3(P.x*_Box.x+_Streak.y,(P.y+1)*_Box.y,P.z*(_Streak.z>0?_Streak.z:_Box.x));
                     float heat; float D=Fire(m,heat);
                     if(D>0.002)
                     {

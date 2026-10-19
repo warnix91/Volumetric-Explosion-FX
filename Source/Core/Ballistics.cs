@@ -43,6 +43,8 @@ namespace VolumetricExplosionFX.Core
         public bool Burning;
         public double LandHeight, Hop, SlideTime, SettleAngle;
         public Vec3 Slide, SettleAxis;
+        // Ground under the piece where it lands, as a plane: height change per metre along x and z (effect frame).
+        public double SlopeX, SlopeZ;
     }
     public static class DebrisPlanner
     {
@@ -66,7 +68,9 @@ namespace VolumetricExplosionFX.Core
             double speed=LaunchSpeed(plan), mean=0;
             for(int f=0;f<cut.Count;f++) mean+=cut.Radius[f];
             mean=Math.Max(mean/Math.Max(cut.Count,1),0.05);
-            Vec3 inherited=surface?new Vec3(partVelocity.X*0.35,Math.Max(0,-partVelocity.Y)*0.06,partVelocity.Z*0.35):partVelocity;
+            // 1.1: wreckage keeps more of a sideways crash's momentum and tumbles on along the path.
+            double keep=plan.Look!=null&&plan.Look.Modern?0.6:0.35;
+            Vec3 inherited=surface?new Vec3(partVelocity.X*keep,Math.Max(0,-partVelocity.Y)*0.06,partVelocity.Z*keep):partVelocity;
             var result=new FragmentMotion[cut.Count];
             for(int f=0;f<cut.Count;f++)
             {
@@ -110,6 +114,7 @@ namespace VolumetricExplosionFX.Core
         public static void Land(FractureResult cut,int fragment,Quat toEffect,ref FragmentMotion m,double floor,double gravity,double horizon,bool wet=false)
         {
             m.Hop=0; m.Slide=new Vec3(); m.SlideTime=0; m.SettleAngle=0; m.SettleAxis=new Vec3(1,0,0);
+            m.SlopeX=Numbers.Clamp(m.SlopeX,-1.5,1.5); m.SlopeZ=Numbers.Clamp(m.SlopeZ,-1.5,1.5);
             double t=Ballistics.LandingTime(m.Pivot.Y,m.Velocity.Y,m.Drag,gravity,floor,horizon);
             if(double.IsPositiveInfinity(t)) { m.LandTime=t; m.RestHeight=floor; m.LandHeight=floor; return; }
             double rest=floor;
@@ -131,7 +136,7 @@ namespace VolumetricExplosionFX.Core
                 double friction=0.5*Math.Max(gravity,0.5);
                 Vec3 slide=new Vec3(m.Velocity.X*decay,0,m.Velocity.Z*decay)*0.35;
                 double speed=slide.Length;
-                if(speed*speed/(2*friction)>30) { slide=slide*(Math.Sqrt(60*friction)/speed); speed=slide.Length; }
+                if(speed*speed/(2*friction)>15) { slide=slide*(Math.Sqrt(30*friction)/speed); speed=slide.Length; }   // metal digs into the ground
                 m.Slide=slide; m.SlideTime=speed/friction;
             }
             double angle=Ballistics.SpinAngle(m.SpinRate,m.Drag,t);
@@ -162,6 +167,8 @@ namespace VolumetricExplosionFX.Core
                 double skid=m.SlideTime>1e-6?s-s*s/(2*m.SlideTime):0;
                 double settled=Settled(m,gravity,tau);
                 double y=settled>=1?m.RestHeight:m.LandHeight+(m.RestHeight-m.LandHeight)*settled;
+                // The skid follows the ground's slope (up or down the hill), not the flat plane of the blast.
+                y+=(m.SlopeX*m.Slide.X+m.SlopeZ*m.Slide.Z)*skid;
                 return new Vec3(p.X+m.Slide.X*skid,y+HopHeight(m,gravity,tau),p.Z+m.Slide.Z*skid);
             }
             return Ballistics.Position(m.Pivot,m.Velocity,m.Drag,gravity,age);

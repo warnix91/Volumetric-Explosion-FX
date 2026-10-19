@@ -23,6 +23,28 @@ namespace VolumetricExplosionFX.Rendering
             text.Append(" | effect layer "+EffectLayer.Value);
             Debug.Log(text.ToString());
         }
+        // Compatibility report: what every camera draws through command buffers (other mods' passes: Scatterer's atmosphere
+        // and ocean, EVE's clouds, Deferred's lighting), in the order of the camera's events, so a clash with VEFX's volume
+        // pass (AfterForwardAlpha) can be read from the log.
+        internal static string RenderStack()
+        {
+            var text=new StringBuilder("[VEFX] Render stack:");
+            foreach(Camera c in Camera.allCameras)
+            {
+                if(c==null) continue;
+                var line=new StringBuilder();
+                foreach(UnityEngine.Rendering.CameraEvent e in Enum.GetValues(typeof(UnityEngine.Rendering.CameraEvent)))
+                {
+                    var buffers=c.GetCommandBuffers(e);
+                    if(buffers==null||buffers.Length==0) continue;
+                    line.Append(" "+e+"[");
+                    for(int i=0;i<buffers.Length;i++) line.Append((i>0?", ":"")+(string.IsNullOrEmpty(buffers[i].name)?"unnamed":buffers[i].name));
+                    line.Append("]");
+                }
+                text.Append(" | "+c.name+" ("+c.actualRenderingPath+", depth "+c.depth.ToString("0.#")+")"+(line.Length>0?":"+line:""));
+            }
+            return text.ToString();
+        }
         internal static void Refresh()
         {
             FlightCamera fc=FlightCamera.fetch;

@@ -20,6 +20,7 @@ Shader "VolumetricExplosionFX/Trail"
             #include "UnityCG.cginc"
             sampler3D _NoiseTex;
             float4 _VefxSun, _VefxAmbient, _VefxSky, _VefxFire0, _VefxFire1, _VefxFireRange;
+            float _VefxModern;   // 1 with the 1.1 looks
             float _Glow;
             struct appdata { float4 vertex:POSITION; float4 color:COLOR; float2 uv:TEXCOORD0; };
             struct v2f { float4 pos:SV_POSITION; float4 color:COLOR; float2 uv:TEXCOORD0; float3 world:TEXCOORD1; };
@@ -55,7 +56,10 @@ Shader "VolumetricExplosionFX/Trail"
                 float3 V=normalize(i.world-_WorldSpaceCameraPos);
                 float forward=pow(saturate(dot(V,normalize(_VefxSun.xyz+float3(0,1e-5,0)))),5);
                 float3 sun=float3(1,0.96,0.9)*_VefxSun.w*(0.3+0.45*n.b+0.15*m.g+0.9*forward);
-                float3 light=sun+_VefxSky.rgb*0.75+_VefxAmbient.rgb*0.5+Fire(_VefxFire0,_VefxFireRange.x,i.world)+Fire(_VefxFire1,_VefxFireRange.y,i.world);
+                float3 fire=Fire(_VefxFire0,_VefxFireRange.x,i.world)+Fire(_VefxFire1,_VefxFireRange.y,i.world);
+                // 1.1: smoke near a flash is lit, not turned into glowing orange spikes (soft ceiling on the fire light).
+                if(_VefxModern>0.5) fire=fire/(1+fire*0.9);
+                float3 light=sun+_VefxSky.rgb*0.75+_VefxAmbient.rgb*0.5+fire;
                 float3 color=i.color.rgb*light;
                 return float4(color*alpha,alpha);
             }

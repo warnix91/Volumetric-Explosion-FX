@@ -24,6 +24,7 @@ Shader "VolumetricExplosionFX/PartFragment"
         float4 spin:TEXCOORD3;    // spin axis * rate, rest height of the pivot (lying flat)
         float4 settle:TEXCOORD4;  // turn that lays it flat (axis * angle), hop speed
         float4 after:TEXCOORD5;   // skid velocity (x, z), skid time, touchdown height of the pivot
+        float4 slope:TEXCOORD6;   // ground slope where it lands (height per metre along x, z)
     };
     float E1(float u) { return u<0.02?1-u*(0.5-u*(1.0/6-u/24)):(1-exp(-u))/u; }
     float E2(float u) { return u<0.02?0.5-u*(1.0/6-u*(1.0/24-u/120)):(u-1+exp(-u))/(u*u); }
@@ -47,14 +48,19 @@ Shader "VolumetricExplosionFX/PartFragment"
         if(_Age>=land)
         {
             float tau=_Age-land, ts=v.after.z, s=min(tau,ts);
-            if(ts>1e-6) at.xz+=v.after.xy*(s-s*s/(2*ts));
+            float2 skid=ts>1e-6?v.after.xy*(s-s*s/(2*ts)):0;
+            at.xz+=skid;
             float g=max(_Gravity,0.1), th=v.settle.w>0?2*v.settle.w/g:0;
             float hop=tau<th?v.settle.w*tau-0.5*g*tau*tau:0;
             float sa=length(v.settle.xyz);
             float x=saturate(tau/(th+0.35+0.25*min(sa,1.6)));
             float settled=x*x*(3-2*x);
             if(sa>1e-4) { float3 sx=v.settle.xyz/sa; q=Rotate(q,sx,sa*settled); n=Rotate(n,sx,sa*settled); }
-            at.y=(settled>=1?v.spin.w:lerp(v.after.w,v.spin.w,settled))+max(hop,0);
+            at.y=(settled>=1?v.spin.w:lerp(v.after.w,v.spin.w,settled))+max(hop,0)+dot(v.slope.xy,skid);
+            // Lie on the slope, not on the flat plane of the blast.
+            float3 gn=normalize(float3(-v.slope.x,1,-v.slope.y));
+            float tilt=acos(saturate(gn.y))*settled;
+            if(tilt>1e-4) { float3 ga=normalize(float3(gn.z,0,-gn.x)); q=Rotate(q,ga,tilt); n=Rotate(n,ga,tilt); }
         }
         p=at+q;
     }
@@ -78,6 +84,7 @@ Shader "VolumetricExplosionFX/PartFragment"
             #pragma target 3.0
             #pragma only_renderers d3d11 glcore metal
             float4 _VefxSun, _VefxAmbient, _VefxSky, _VefxUp, _VefxFire0, _VefxFire1, _VefxFireRange;
+            float _VefxModern;   // 1 with the 1.1 looks
             struct v2f
             {
                 float4 pos:SV_POSITION; float3 uv:TEXCOORD0; float3 world:TEXCOORD1; float3 normal:TEXCOORD2;
@@ -114,10 +121,25 @@ Shader "VolumetricExplosionFX/PartFragment"
                 if(back||inner) albedo=albedo*0.3+float3(0.07,0.065,0.06);
                 if(wall) albedo=float3(0.46,0.45,0.43)*(0.75+0.5*n.a);
                 float edge=saturate((rim-0.55)*2.2)*smoothstep(0.42,0.72,n.r);
-                float burnt=saturate((charAmount*1.2+edge*0.45-n.g*1.05-0.2)*3.5);
+                // 1.1: char fades into soot-stained paint (graded, not black-and-white blotches), and the whole piece
+                // carries a smoky film from the fire.
+                float burnt=saturate((charAmount*1.2+edge*0.45-n.g*1.05-0.2)*(_VefxModern>0.5?1.7:3.5));
+                if(_VefxModern>0.5) albedo*=lerp(1,0.5+0.35*n.a,saturate(charAmount*1.4));
                 albedo=lerp(albedo,float3(0.045,0.04,0.035),burnt*0.93);
                 float temp=0.75*heat*exp(-_Age/max(_Cool,0.1))*saturate(edge*0.9+(n.r-0.6)*2.5*charAmount);
                 float3 glow=Incandescence(temp)*temp*temp*1.8;
+                if(_VefxModern>0.5)
+                {
+                    // 1.1: metal heated near the tear shows temper colours (straw to blue) as it cools, and charred patches
+                    // smoulder in a dull, flickering red long after the bright rims have gone dark.
+                    float cooled=1-exp(-_Age/max(_Cool,0.1));
+                    float band=saturate(edge*1.4+(n.b-0.5)*0.8)*heat*cooled*(1-burnt)*(back||inner?0.3:1);
+                    float3 temper=lerp(float3(0.78,0.62,0.36),float3(0.36,0.32,0.58),saturate(n.a*1.6-0.3));
+                    albedo=lerp(albedo,temper*dot(albedo,float3(0.35,0.45,0.2))*1.8,band*0.55);
+                    float ember=burnt*heat*smoothstep(0.55,0.8,n.r)*exp(-_Age/max(_Cool*5,0.1));
+                    float flicker=0.65+0.35*sin(_Age*(5.3+seed*7)+n.g*12);
+                    glow+=float3(0.55,0.08,0.01)*ember*flicker*0.9;
+                }
                 float3 N=normalize(i.normal)*(back?-1:1);
                 float3 L=normalize(_VefxSun.xyz+float3(0,1e-5,0));
                 float3 V=normalize(_WorldSpaceCameraPos-i.world);

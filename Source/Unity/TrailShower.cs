@@ -108,7 +108,7 @@ namespace VolumetricExplosionFX.Rendering
             shape.angle=15; shape.radius=0.4f; shape.rotation=new Vector3(-90,0,0);
         }
         enum Shape { Spread, Plume, Taper, Dust }
-        void Look(Color smoke,double width,bool trailsOn,double step,Shape shape)
+        void Look(Color smoke,double width,bool trailsOn,double step,Shape shape,float opacity=1)
         {
             ParticleSystem.TrailModule trails=System.trails; trails.enabled=trailsOn; trails.inheritParticleColor=false;
             trails.lifetime=new ParticleSystem.MinMaxCurve(TrailShare);
@@ -134,6 +134,7 @@ namespace VolumetricExplosionFX.Rendering
                     break;
             }
             trails.widthOverTrail=new ParticleSystem.MinMaxCurve((float)width,w);
+            if(opacity!=1) for(int k=0;k<a.Length;k++) a[k].alpha*=opacity;
             var g=new Gradient();
             if(shape==Shape.Taper) g.SetKeys(new[]{new GradientColorKey(smoke,0),new GradientColorKey(new Color(smoke.r,smoke.g*0.62f,smoke.b*0.35f),0.35f),
                 new GradientColorKey(new Color(smoke.r*0.85f,smoke.g*0.3f,smoke.b*0.1f),1)},a);
@@ -243,9 +244,9 @@ namespace VolumetricExplosionFX.Rendering
             double floor=Math.Max(plan.MinUp,plan.UpBias>0.5?0.05:-1);
             return dir.Y>=floor?dir:new Vec3(dir.X,floor,dir.Z).Normalized(new Vec3(0,1,0));
         }
-        internal void Trace(int n,Color smoke,double width,float[] active,Vector3[] start,Color head,float size,double persistence=1.4,bool plume=false)
+        internal void Trace(int n,Color smoke,double width,float[] active,Vector3[] start,Color head,float size,double persistence=1.4,bool plume=false,float opacity=1)
         {
-            Look(smoke,width,true,plume?2.5:1.5,plume?Shape.Plume:Shape.Spread);
+            Look(smoke,width,true,plume?2.5:1.5,plume?Shape.Plume:Shape.Spread,opacity);
             ParticleSystem.ForceOverLifetimeModule force=System.forceOverLifetime; force.enabled=false;
             ParticleSystem.LimitVelocityOverLifetimeModule drag=System.limitVelocityOverLifetime; drag.enabled=false;
             traced=true; streaming=false; headColor=head; landing=null; gravity=0;

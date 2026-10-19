@@ -22,6 +22,8 @@ namespace VolumetricExplosionFX.Ksp
         {
             float t=Time.unscaledTime;
             double frame=Time.unscaledDeltaTime*1000.0, mine=ourMs; ourMs=0;
+            // Game paused (pause menu): effects are frozen, so neither the frame times nor the clock of the episode count.
+            if(Time.timeScale<=0f) { if(episode) { started+=Time.unscaledDeltaTime; if(quietSince>=0) quietSince+=Time.unscaledDeltaTime; } return; }
             if(now.Busy)
             {
                 if(!episode) { episode=true; started=t; gcAtStart=GC.CollectionCount(0); busy.Clear(); ours.Clear(); peak=default(EffectLoad); }

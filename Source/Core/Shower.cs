@@ -52,7 +52,18 @@ namespace VolumetricExplosionFX.Core
             }
             else return s;
             s.UpBias=surface?(s.Kind==ShowerKind.Liquid?0.6:0.85):0.25;
+            // 1.1: burning propellant throws fewer, bigger chunks trailing thick smoke, not a fountain of thin threads.
+            if(s.Kind==ShowerKind.Solid&&plan.Look!=null&&plan.Look.Modern) { s.Count=Math.Max(6,(int)(s.Count*0.5)); s.TrailWidth*=2.4; }
+            // 1.1 brutal pass: burning fragments fly out harder.
+            if(plan.Look!=null&&plan.Look.Modern) { s.SpeedMin*=1.25; s.SpeedMax*=1.3; }
+            // 1.1: burning fuel flung out flies up in arcs and leaves thin smoke that is soon gone (wide dark trails
+            // flying out low read as dark lines raying out over the ground, "encore pire pour les effets d'onde au sol").
+            if(s.Kind==ShowerKind.Liquid&&plan.Look!=null&&plan.Look.Modern) { if(surface) { s.UpBias=0.85; s.MinUp=0.4; } s.TrailWidth*=0.45; s.TrailLife*=0.55; }
             Thin(ref s,air);
+            // 1.1: a warhead's fragments are steel, not burning fuel: glowing sparks without smoke trails (only
+            // incendiary and fuel-air charges throw burning matter).
+            if(plan.Look!=null&&plan.Look.Modern&&plan.Warhead!=WarheadKind.None&&plan.Warhead!=WarheadKind.Structure&&
+                plan.Warhead!=WarheadKind.Incendiary&&plan.Warhead!=WarheadKind.Thermobaric) s.Trails=false;
             return s;
         }
         public static ShowerPlan Heavy(FxPlan plan,bool surface,double gravity,int budget)
@@ -88,6 +99,8 @@ namespace VolumetricExplosionFX.Core
             s.Axis=(new Vec3(0,1,0)+horizontal.Normalized(new Vec3())*(0.8*tilt)).Normalized(new Vec3(0,1,0));
             s.Cone=1.1; s.MinUp=0.3;
             s.Clumps=5; s.ClumpShare=0.6;
+            // 1.1: dirt is thrown in a few thick, short-lived jets, not a star of long thin lines.
+            if(plan.Look!=null&&plan.Look.Modern) { s.Count=Math.Max(6,(int)(s.Count*0.6)); s.TrailWidth*=1.4; s.TrailLife*=0.45; s.MinUp=0.55; }
             return s;
         }
         static void Thin(ref ShowerPlan s,double air)

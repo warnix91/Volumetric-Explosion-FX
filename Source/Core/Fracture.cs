@@ -40,7 +40,7 @@ namespace VolumetricExplosionFX.Core
                 skinArea+=0.5*Vec3.Cross(b0-a0,c0-a0).Length;
             }
             double side=1.52*Math.Sqrt(Math.Max(skinArea,1e-9)/(pieces*48.0));
-            PartMesh m=Refine(mesh,1.5*side,skinBudget);
+            PartMesh m=Needles(Refine(mesh,1.5*side,skinBudget),4*side);
             int maxTriangles0=maxTriangles; maxTriangles=skinBudget;
             int T=m.TriangleCount;
             double extent=Extent(m.Positions);
@@ -64,11 +64,16 @@ namespace VolumetricExplosionFX.Core
             var order=new int[components]; for(int c=0;c<components;c++) order[c]=c;
             Array.Sort(order,(x,y)=>componentArea[y].CompareTo(componentArea[x]));
             var seedsOf=new int[components]; int seeds=0;
+            // Long, thin separate parts of a model (raceways, pipes, stripes along a booster) get pieces by their length
+            // too, or a whole 10 m strip flies off as one "spaghetti".
+            var lengthOf=ComponentLengths(m,component,components);
+            double pieceSize=Math.Min(1.2*Math.Sqrt(total/pieces),2.0);   // never a piece longer than ~2 m left as one strip
             for(int i=0;i<components;i++)
             {
                 int c=order[i];
                 int k=Math.Max(1,(int)Math.Round(pieces*componentArea[c]/total));
-                if(seeds+k>pieces*2) { if(seeds>=pieces) break; k=Math.Max(1,pieces*2-seeds); }
+                k=Math.Max(k,(int)Math.Ceiling(lengthOf[c]/pieceSize));
+                if(seeds+k>pieces*3) { if(seeds>=pieces*2) break; k=Math.Max(1,pieces*3-seeds); }
                 seedsOf[c]=k; seeds+=k;
             }
             var label=new int[T]; var dist=new double[T];
@@ -282,6 +287,45 @@ namespace VolumetricExplosionFX.Core
             }
         }
         static long PairKey(int a,int b) { return a<b?((long)a<<32)|(uint)b:((long)b<<32)|(uint)a; }
+        // Largest bounding-box side of each connected part of the mesh.
+        static double[] ComponentLengths(PartMesh m,int[] component,int components)
+        {
+            var lo=new Vec3[components]; var hi=new Vec3[components]; var seen=new bool[components];
+            for(int t=0;t<m.TriangleCount;t++)
+            {
+                int c=component[t];
+                for(int k=0;k<3;k++)
+                {
+                    Vec3 p=m.Positions[m.Triangles[3*t+k]];
+                    if(!seen[c]) { lo[c]=p; hi[c]=p; seen[c]=true; continue; }
+                    lo[c]=new Vec3(Math.Min(lo[c].X,p.X),Math.Min(lo[c].Y,p.Y),Math.Min(lo[c].Z,p.Z));
+                    hi[c]=new Vec3(Math.Max(hi[c].X,p.X),Math.Max(hi[c].Y,p.Y),Math.Max(hi[c].Z,p.Z));
+                }
+            }
+            var length=new double[components];
+            for(int c=0;c<components;c++) { Vec3 d=hi[c]-lo[c]; length[c]=Math.Max(d.X,Math.Max(d.Y,d.Z)); }
+            return length;
+        }
+        // Triangles still far longer than a piece (the budget ran out) would fly off as needles: leave them out.
+        static PartMesh Needles(PartMesh m,double limit)
+        {
+            double limit2=limit*limit; int T=m.TriangleCount, kept=0;
+            var keep=new bool[T];
+            for(int t=0;t<T;t++)
+            {
+                Vec3 a=m.Positions[m.Triangles[3*t]], b=m.Positions[m.Triangles[3*t+1]], c=m.Positions[m.Triangles[3*t+2]];
+                double l=Math.Max(Vec3.Dot(b-a,b-a),Math.Max(Vec3.Dot(c-b,c-b),Vec3.Dot(a-c,a-c)));
+                keep[t]=l<=limit2; if(keep[t]) kept++;
+            }
+            if(kept==T||kept==0) return m;
+            var tri=new int[kept*3]; var groups=new int[kept]; int k=0;
+            for(int t=0;t<T;t++) if(keep[t])
+            {
+                tri[3*k]=m.Triangles[3*t]; tri[3*k+1]=m.Triangles[3*t+1]; tri[3*k+2]=m.Triangles[3*t+2];
+                groups[k]=m.Groups!=null&&t<m.Groups.Length?m.Groups[t]:0; k++;
+            }
+            return new PartMesh { Positions=m.Positions, Normals=m.Normals, Uvs=m.Uvs, Tangents=m.Tangents, Triangles=tri, Groups=groups };
+        }
         static PartMesh Refine(PartMesh mesh,double target,int maxTriangles)
         {
             var p=new List<Vec3>(mesh.Positions); var n=new List<float>(mesh.Normals); var uv=new List<float>(mesh.Uvs);
@@ -304,25 +348,32 @@ namespace VolumetricExplosionFX.Core
                     }
                     longest[t]=best; length[t]=l2; top=Math.Max(top,l2);
                 }
-                double cut2=Math.Max(target2,top*0.3);
-                var split=new HashSet<long>();
-                for(int t=0;t<T;t++)
-                    if(length[t]>cut2) split.Add(EdgeKey(weld[tri[3*t+longest[t]]],weld[tri[3*t+(longest[t]+1)%3]],welded));
-                if(split.Count==0) break;
-                for(bool changed=true;changed;)
+                // Split the edges longer than a share of the longest; when the whole pass would exceed the budget, split only
+                // the very longest (a long booster's full-length side triangles must not survive as needles).
+                HashSet<long> split=null; int added=0;
+                foreach(double share in new[]{0.3,0.5,0.7,0.85,0.95})
                 {
-                    changed=false;
+                    double cut2=Math.Max(target2,top*share);
+                    var trial=new HashSet<long>();
                     for(int t=0;t<T;t++)
+                        if(length[t]>cut2) trial.Add(EdgeKey(weld[tri[3*t+longest[t]]],weld[tri[3*t+(longest[t]+1)%3]],welded));
+                    if(trial.Count==0) break;
+                    for(bool changed=true;changed;)
                     {
-                        long own=EdgeKey(weld[tri[3*t+longest[t]]],weld[tri[3*t+(longest[t]+1)%3]],welded);
-                        if(split.Contains(own)) continue;
-                        for(int e=0;e<3;e++)
-                            if(split.Contains(EdgeKey(weld[tri[3*t+e]],weld[tri[3*t+(e+1)%3]],welded))) { split.Add(own); changed=true; break; }
+                        changed=false;
+                        for(int t=0;t<T;t++)
+                        {
+                            long own=EdgeKey(weld[tri[3*t+longest[t]]],weld[tri[3*t+(longest[t]+1)%3]],welded);
+                            if(trial.Contains(own)) continue;
+                            for(int e=0;e<3;e++)
+                                if(trial.Contains(EdgeKey(weld[tri[3*t+e]],weld[tri[3*t+(e+1)%3]],welded))) { trial.Add(own); changed=true; break; }
+                        }
                     }
+                    int count=0;
+                    for(int t=0;t<T;t++) for(int e=0;e<3;e++) if(trial.Contains(EdgeKey(weld[tri[3*t+e]],weld[tri[3*t+(e+1)%3]],welded))) count++;
+                    if(T+count<=maxTriangles) { split=trial; added=count; break; }
                 }
-                int added=0;
-                for(int t=0;t<T;t++) for(int e=0;e<3;e++) if(split.Contains(EdgeKey(weld[tri[3*t+e]],weld[tri[3*t+(e+1)%3]],welded))) added++;
-                if(T+added>maxTriangles) break;
+                if(split==null||split.Count==0) break;
                 var mid=new Dictionary<long,int>();
                 Func<int,int,int> midpoint=(a,b)=>
                 {

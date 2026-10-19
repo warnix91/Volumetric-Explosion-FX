@@ -13,7 +13,6 @@ namespace VolumetricExplosionFX.Core
             if(!items.Contains(item)) items.Add(item);
             return true;
         }
-        public bool Holds(T item) { return item!=null&&items.Contains(item); }
         public int Restore(Action<T> restore)
         {
             int n=items.Count;

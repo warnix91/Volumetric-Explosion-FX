@@ -16,7 +16,7 @@ namespace VolumetricExplosionFX.Core
             Register("LqdMethane",ResourceKind.Fuel|ResourceKind.Cryogenic); Register("Methane",ResourceKind.Fuel);
             Register("MMH",ResourceKind.Fuel|ResourceKind.Hypergolic); Register("UDMH",ResourceKind.Fuel|ResourceKind.Hypergolic);
             Register("NTO",ResourceKind.Oxidizer|ResourceKind.Hypergolic); Register("Nitrogen",ResourceKind.Pressurized);
-            Register("XenonGas",ResourceKind.Pressurized); Register("ArgonGas",ResourceKind.Pressurized); Register("Helium",ResourceKind.Pressurized);
+            Register("XenonGas",ResourceKind.Pressurized); Register("Ore",ResourceKind.Dust); Register("ArgonGas",ResourceKind.Pressurized); Register("Helium",ResourceKind.Pressurized);
         }
         public void Register(string name, ResourceKind kind) { if (!string.IsNullOrEmpty(name)) profiles[name]=kind; }
         public ResourceKind Lookup(string name) { ResourceKind k; return name!=null&&profiles.TryGetValue(name,out k)?k:ResourceKind.None; }

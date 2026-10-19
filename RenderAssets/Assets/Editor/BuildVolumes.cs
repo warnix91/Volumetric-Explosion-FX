@@ -41,22 +41,37 @@ public static class BuildVolumes
             if(fragment==null || ShaderUtil.ShaderHasError(fragment)) throw new Exception("Part fragment shader import failed.");
             Shader scorch=AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/Scorch.shader");
             if(scorch==null || ShaderUtil.ShaderHasError(scorch)) throw new Exception("Scorch shader import failed.");
+            Shader groundWave=AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/GroundWave.shader");
+            if(groundWave==null || ShaderUtil.ShaderHasError(groundWave)) throw new Exception("Ground wave shader import failed.");
+            Shader smokeShadow=AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/SmokeShadow.shader");
+            if(smokeShadow==null || ShaderUtil.ShaderHasError(smokeShadow)) throw new Exception("Smoke shadow shader import failed.");
             Shader trail=AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/Trail.shader");
             if(trail==null || ShaderUtil.ShaderHasError(trail)) throw new Exception("Trail shader import failed.");
             Shader flame=AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/Flame.shader");
             if(flame==null || ShaderUtil.ShaderHasError(flame)) throw new Exception("Flame shader import failed.");
             Shader fire=AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/FireVolume.shader");
             if(fire==null || ShaderUtil.ShaderHasError(fire)) throw new Exception("Fire volume shader import failed.");
+            Shader composite=AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/Composite.shader");
+            if(composite==null || ShaderUtil.ShaderHasError(composite)) throw new Exception("Composite shader import failed.");
+            Shader nukeShadow=AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/NukeShadow.shader");
+            if(nukeShadow==null || ShaderUtil.ShaderHasError(nukeShadow)) throw new Exception("Nuclear shadow shader import failed.");
+            Shader cloudProbe=AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/CloudProbe.shader");
+            if(cloudProbe==null || ShaderUtil.ShaderHasError(cloudProbe)) throw new Exception("Cloud probe shader import failed.");
+            Shader nukeGlare=AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/NukeGlare.shader");
+            if(nukeGlare==null || ShaderUtil.ShaderHasError(nukeGlare)) throw new Exception("Nuclear glare shader import failed.");
             Texture2D smokeA,smokeB; SmokeFlipbook.Ensure(out smokeA,out smokeB);
             BlueNoise.Ensure();
             if(smokeA==null||smokeB==null) throw new Exception("Smoke flipbook generation failed.");
+            Texture3D fireGround=FireSimTexture.Ensure("ground"), fireGround2=FireSimTexture.Ensure("ground2"), fireAir=FireSimTexture.Ensure("air");
+            FireSimTexture.Ensure("ground3"); FireSimTexture.Ensure("ground4"); FireSimTexture.Ensure("air2"); FireSimTexture.Ensure("nuke"); FireSimTexture.Ensure("nuke2"); FireSimTexture.Ensure("nukeair");
+            if(fireGround==null||fireAir==null) throw new Exception("Fire simulation textures failed.");
             Directory.CreateDirectory(output);
             var bundle=new AssetBundleBuild { assetBundleName="vefx-"+platform+".unity3d",
                 assetNames=new[]{"Assets/Shaders/HeroVolume.shader","Assets/Shaders/HeroFlare.shader","Assets/Shaders/Particle.shader","Assets/Shaders/HeatDistortion.shader","Assets/Shaders/Debris.shader",NoiseTexture.AssetPath,
-                    "Assets/Shaders/Smoke.shader","Assets/Shaders/PartFragment.shader","Assets/Shaders/Scorch.shader","Assets/Shaders/Trail.shader","Assets/Shaders/Flame.shader","Assets/Shaders/FireVolume.shader",SmokeFlipbook.PathA,SmokeFlipbook.PathB,BlueNoise.AssetPath} };
+                    "Assets/Shaders/Smoke.shader","Assets/Shaders/PartFragment.shader","Assets/Shaders/Scorch.shader","Assets/Shaders/SmokeShadow.shader","Assets/Shaders/GroundWave.shader","Assets/Shaders/Trail.shader","Assets/Shaders/Flame.shader","Assets/Shaders/FireVolume.shader","Assets/Shaders/Composite.shader","Assets/Shaders/NukeVolume.shader","Assets/Shaders/NukeGlare.shader","Assets/Shaders/CloudProbe.shader","Assets/Shaders/NukeShadow.shader","Assets/Shaders/SplashVolume.shader",SmokeFlipbook.PathA,SmokeFlipbook.PathB,BlueNoise.AssetPath,FireSimTexture.AssetPath("ground"),FireSimTexture.AssetPath("ground2"),FireSimTexture.AssetPath("ground3"),FireSimTexture.AssetPath("ground4"),FireSimTexture.AssetPath("air"),FireSimTexture.AssetPath("air2"),FireSimTexture.AssetPath("nuke"),FireSimTexture.AssetPath("nuke2"),FireSimTexture.AssetPath("nukeair")} };
             if(BuildPipeline.BuildAssetBundles(output,new[]{bundle},BuildAssetBundleOptions.ForceRebuildAssetBundle|
                 BuildAssetBundleOptions.ChunkBasedCompression,target)==null) throw new Exception("Bundle build failed.");
-            foreach(Shader compiled in new[]{shader,flare,particle,distortion,debris,smoke,fragment,scorch,trail,flame,fire})
+            foreach(Shader compiled in new[]{shader,flare,particle,distortion,debris,smoke,fragment,scorch,smokeShadow,groundWave,trail,flame,fire,composite,nukeGlare,cloudProbe,nukeShadow})
                 foreach(var message in ShaderUtil.GetShaderMessages(compiled))
                     if(message.severity==UnityEditor.Rendering.ShaderCompilerMessageSeverity.Error)
                         throw new Exception(compiled.name+": "+message.message);
@@ -262,7 +277,7 @@ public static class BuildVolumes
         rt=new RenderTexture(128,128,24,RenderTextureFormat.ARGB32); camera.targetTexture=rt;
         Shader.SetGlobalVector("_VefxSun",new Vector4(0.3f,0.5f,-0.81f,1)); Shader.SetGlobalVector("_VefxAmbient",new Vector4(0.2f,0.2f,0.22f,1));
         Shader.SetGlobalVector("_VefxSky",new Vector4(0.36f,0.43f,0.55f,1)); Shader.SetGlobalVector("_VefxUp",new Vector4(0,1,0,0));
-        Shader.SetGlobalVector("_VefxFire0",Vector4.zero); Shader.SetGlobalVector("_VefxFire1",Vector4.zero); Shader.SetGlobalVector("_VefxFireRange",new Vector4(10,10,0,0));
+        Shader.SetGlobalVector("_VefxFire0",Vector4.zero); Shader.SetGlobalVector("_VefxFire1",Vector4.zero); Shader.SetGlobalVector("_VefxFireRange",new Vector4(10,10,0,0)); Shader.SetGlobalVector("_VefxLamp",Vector4.zero);
         return camera;
     }
     static Mesh ProbeQuad()

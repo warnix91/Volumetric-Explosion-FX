@@ -6,7 +6,7 @@ from localization import validate_localization
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 NAME='VolumetricExplosionFX'
-VERSION='1.0.0'
+VERSION='1.1.0'
 BUILD=ROOT/'build'
 def run(args):
     subprocess.run([str(x) for x in args],check=True,cwd=ROOT)
@@ -83,7 +83,15 @@ def test(args):
     audit()
     run([sys.executable,'-m','unittest','discover','-s','Tests','-p','test_*.py'])
     # No NuGet packages or mock Unity runtime. Core source compiled and exercised on .NET.
-    run(['dotnet','run','--project','Tests/VolumetricExplosionFX.Tests.csproj','--configuration','Release'])
+    sdks=subprocess.run(['dotnet','--list-sdks'],capture_output=True,text=True).stdout if shutil.which('dotnet') else ''
+    if any(int(line.split('.')[0])>=8 for line in sdks.splitlines() if line[:1].isdigit()):
+        run(['dotnet','run','--project','Tests/VolumetricExplosionFX.Tests.csproj','--configuration','Release'])
+    elif shutil.which('mono') and shutil.which('csc'):
+        # Same sources on Mono (the runtime family KSP uses) when no .NET 8 SDK is installed.
+        exe=BUILD/'core-tests'/'CoreTests.exe';exe.parent.mkdir(parents=True,exist_ok=True)
+        run(['csc','-nologo','-nowarn:CS0162,CS0168,CS0219','-optimize+','-out:'+str(exe),ROOT/'Tests/Program.cs']+sorted((ROOT/'Source'/'Core').glob('*.cs')))
+        run(['mono',exe])
+    else: raise RuntimeError('Core tests need a .NET 8 SDK, or Mono with csc.')
     BUILD.mkdir(exist_ok=True)
     (BUILD/'tests-receipt.json').write_text(json.dumps({'source_sha256':digest(),'core_tests_passed':True},indent=2)+'\n')
 def validate_tree(folder):

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System;
 using VolumetricExplosionFX.Core;
 class Program
@@ -13,6 +14,7 @@ class Program
     }
     static FxPlan Plan(PartSnapshot p,EventKind kind=EventKind.Destruction)
     { return VisualEnergy.Calculate(new DestructionEvent(p,kind,0),new ResourceClassifier(),new FxSettings()); }
+    static FxPlan LookPlan(FxPlan p,LookProfile look) { p.Look=look; return p; }
     static PartMesh TankMesh(int segments,int rings,double radius,double height)
     {
         var p=new System.Collections.Generic.List<Vec3>(); var n=new System.Collections.Generic.List<float>(); var uv=new System.Collections.Generic.List<float>();
@@ -146,8 +148,8 @@ class Program
             Check(huge.Radius<=30&&huge.DebrisCount<=128,"Huge event remains bounded");
             Check(Plan(Part(1,full),EventKind.WaterImpact).FireFraction<air.FireFraction,"Water reduces initial flame fraction");
             var s=new FxSettings();s.ApplyPreset(Quality.Low);
-            Check(s.MaxEvents==6&&s.MaxLights==1&&s.MaxDebris==256,"Low preset budgets");
-            s.ApplyPreset(Quality.Ultra);Check(s.MaxEvents==24&&s.MaxLights==6,"Ultra preset still capped");
+            Check(s.MaxEvents==10&&s.MaxLights==1&&s.MaxDebris==256,"Low preset budgets");
+            s.ApplyPreset(Quality.Ultra);Check(s.MaxEvents==32&&s.MaxLights==6,"Ultra preset still capped");
             s.Intensity=double.NaN;s.MaxDebris=int.MaxValue;s.MaxLights=-10;s.Validate();
             Check(s.Intensity==0.25&&s.MaxDebris==4096&&s.MaxLights==0,"Custom settings sanitize limits");
             var clusters=new EventClusterer();
@@ -271,8 +273,8 @@ class Program
             claims.Claim(new Vec3(50,0,0),20,5,3); claims.Shift(new Vec3(50,0,0));
             Check(claims.OwnerAt(new Vec3(),20.1)==3,"Stock claims follow floating origin");
             s.MaxVolumes=999;s.VolumeSteps=999;s.Validate();
-            Check(s.MaxVolumes==8&&s.VolumeSteps==56,"Hero volume count and GPU steps remain capped");
-            s.ApplyPreset(Quality.Low);Check(s.MaxVolumes==2&&s.VolumeSteps==24,"Low preset bounds hero volume work");
+            Check(s.MaxVolumes==16&&s.VolumeSteps==56,"Hero volume count and GPU steps remain capped");
+            s.ApplyPreset(Quality.Low);Check(s.MaxVolumes==4&&s.VolumeSteps==24,"Low preset bounds hero volume work");
             var tank=Plan(Part(1.225,new[]{R("LiquidFuel",900),R("Oxidizer",1100)},speed:60,mass:2250),EventKind.GroundImpact);
             Check(BlastLayout.Create(tank,new Vec3(120,-35,0),true,false,7,null).Form==BlastForm.Grazing,"Shallow fast crash is a grazing blast");
             Check(BlastLayout.Create(tank,new Vec3(5,-160,3),true,false,7,null).Form==BlastForm.Vertical,"Steep fast crash is a vertical splash");
@@ -369,6 +371,36 @@ class Program
             var fxAgain=Fracture.Cut(fxTank,12,7,3000,1);
             var fxOther=Fracture.Cut(fxTank,12,8,3000,1);
             Check(fxCut!=null&&fxCut.Count>=6&&fxCut.Count<=24,"A tank tears into a dozen pieces");
+            {
+                // A booster: full-length side triangles plus a detailed nozzle that eats the triangle budget.
+                PartMesh body=TankMesh(16,1,0.6,14), nozzle=TankMesh(96,40,0.5,0.8), pipe=TankMesh(6,28,0.04,14);
+                var bp=new List<Vec3>(body.Positions); var bn=new List<float>(body.Normals); var bu=new List<float>(body.Uvs); var bt=new List<int>(body.Triangles);
+                foreach(PartMesh extra in new[]{nozzle,pipe})
+                {
+                    int nb=bp.Count; bool aside=extra==pipe;
+                    foreach(Vec3 q in extra.Positions) bp.Add(aside?q+new Vec3(0.7,0,0):q);
+                    bn.AddRange(extra.Normals); bu.AddRange(extra.Uvs);
+                    foreach(int i in extra.Triangles) bt.Add(i+nb);
+                }
+                var booster=new PartMesh{ Positions=bp.ToArray(), Normals=bn.ToArray(), Uvs=bu.ToArray(), Triangles=bt.ToArray(), Groups=new int[bt.Count/3] };
+                var boosterCut=Fracture.Cut(booster,20,3,2500,1);
+                double longestEdge=0;
+                for(int t=0;boosterCut!=null&&t<boosterCut.TriangleCount;t++)
+                {
+                    Vec3 ea=boosterCut.Positions[boosterCut.Triangles[3*t]], eb=boosterCut.Positions[boosterCut.Triangles[3*t+1]], ec=boosterCut.Positions[boosterCut.Triangles[3*t+2]];
+                    longestEdge=Math.Max(longestEdge,Math.Max((eb-ea).Length,Math.Max((ec-eb).Length,(ea-ec).Length)));
+                }
+                double longestPiece=0;
+                for(int f=0;boosterCut!=null&&f<boosterCut.Count;f++)
+                {
+                    Vec3 lo=new Vec3(1e9,1e9,1e9), hi=new Vec3(-1e9,-1e9,-1e9);
+                    for(int v=boosterCut.FirstVertex[f];v<boosterCut.FirstVertex[f]+boosterCut.VertexCounts[f];v++)
+                    { Vec3 q=boosterCut.Positions[v]; lo=new Vec3(Math.Min(lo.X,q.X),Math.Min(lo.Y,q.Y),Math.Min(lo.Z,q.Z)); hi=new Vec3(Math.Max(hi.X,q.X),Math.Max(hi.Y,q.Y),Math.Max(hi.Z,q.Z)); }
+                    Vec3 d=hi-lo; longestPiece=Math.Max(longestPiece,Math.Max(d.X,Math.Max(d.Y,d.Z)));
+                }
+                Check(boosterCut!=null&&boosterCut.Count>=6&&longestEdge<7&&longestPiece<3,"A long booster tears into pieces, not into full-length needles or strips (edge "+
+                    longestEdge.ToString("0.0")+" m, piece "+longestPiece.ToString("0.0")+" m)");
+            }
             Check(fxCut.Pivot[0].X==fxAgain.Pivot[0].X&&fxCut.Count==fxAgain.Count&&(fxOther.Count!=fxCut.Count||fxOther.Pivot[0].X!=fxCut.Pivot[0].X),
                 "Same part and seed cut the same way, another seed differently");
             bool fxOwnVertices=true;
@@ -550,6 +582,627 @@ class Program
             Check(frames.Count==100&&frames.Worst==1000&&frames.Median==100,"Frame statistics keep only the latest window");
             var load=new EffectLoad(); load.Peak(new EffectLoad { Blasts=3, FireVolumes=1 }); load.Peak(new EffectLoad { Blasts=1, Particles=900 });
             Check(load.Blasts==3&&load.FireVolumes==1&&load.Particles==900&&load.Busy,"The probe keeps the peak of each kind of load");
+            var lookTank=Plan(Part(1.225,new[]{R("LiquidFuel",900),R("Oxidizer",1100)},speed:60,mass:2250),EventKind.GroundImpact);
+            var lookLayout=BlastLayout.Create(lookTank,new Vec3(8,-14,3),true,false,7,null);
+            var noLook=VolumeEvolution.Evaluate(lookTank,1.2,true,true,true,false,lookLayout);
+            double noLookDuration=VolumeEvolution.VolumeDuration(lookTank);
+            lookTank.Look=LookProfile.Classic();
+            var classic=VolumeEvolution.Evaluate(lookTank,1.2,true,true,true,false,lookLayout);
+            Check(classic.FireHeat==noLook.FireHeat&&classic.NoiseRadius==noLook.NoiseRadius&&classic.FireSoot==noLook.FireSoot&&
+                classic.ShockStrength==noLook.ShockStrength&&classic.FireBody==noLook.FireBody&&classic.Lobe0.Radius==noLook.Lobe0.Radius&&
+                VolumeEvolution.VolumeDuration(lookTank)==noLookDuration&&VolumeEvolution.LightIntensity(classic)==VolumeEvolution.LightIntensity(noLook),
+                "The Classic look reproduces the 1.0 evolution exactly");
+            {
+                var modernTank=LookProfile.Default(LookKind.Tank);
+                lookTank.Look=LookProfile.Classic(); double lateClassic=VolumeEvolution.VolumeDuration(lookTank);
+                var oldLate=VolumeEvolution.Evaluate(lookTank,0.8*lateClassic,true,true,true,false,lookLayout);
+                lookTank.Look=modernTank;
+                var newLate=VolumeEvolution.Evaluate(lookTank,0.8*VolumeEvolution.VolumeDuration(lookTank),true,true,true,false,lookLayout);
+                Check(!LookProfile.Classic().Modern&&modernTank.Modern&&modernTank.Clone().Modern&&!modernTank.SameAs(LookProfile.Classic())&&
+                    LookProfile.Classic().Shader1.Z==0&&modernTank.Shader1.Z==1,"Only the 1.1 profiles switch the new renderer extras on");
+                Check(oldLate.Dissolve==0&&newLate.Dissolve>0.3&&newLate.Dissolve<=1&&newLate.Fade>=oldLate.Fade,
+                    "1.1 smoke breaks up from its edges while the 1.0 look keeps its smooth fade");
+                lookTank.Look=LookProfile.Classic();
+            }
+            {
+                var g=FireSim.Ground;
+                bool monotonic=true; double prev=-1;
+                for(int k=0;k<=40;k++) { double f=FireSim.Frame(g,g.TMax*k/40.0); monotonic&=f>=prev&&f<=g.Frames-1+1e-9; prev=f; }
+                var box=new double[6]; FireSim.Box(g,g.Frames-1,box);
+                Check(monotonic&&FireSim.Frame(g,0)==0&&Math.Abs(FireSim.Frame(g,g.TMax*2)-(g.Frames-1))<1e-9&&box[1]>box[0]&&box[3]>box[2]&&box[5]>box[4],
+                    "The baked fireball clock runs from the first to the last frame and the gas box is valid");
+                VolumeEvolution.UseSim=true;
+                try
+                {
+                    lookTank.Look=LookProfile.Default(LookKind.Tank);
+                    var withSim=VolumeEvolution.Evaluate(lookTank,1.0,true,true,true,false,lookLayout);
+                    Vec4 lc,la,ld; VolumeEvolution.PackLobe(withSim,0,out lc,out la,out ld);
+                    bool finite=!double.IsNaN(lc.X+lc.Y+lc.Z+lc.W+la.X+la.Y+la.Z+la.W+ld.X+ld.Y+ld.Z+ld.W);
+                    Check(withSim.Sim&&withSim.Lobe0.Sim&&finite&&lc.W>0&&la.Z!=0&&la.W>=0&&la.W<=g.Frames-1&&VolumeEvolution.Motion(withSim).W==1&&withSim.BoundsRadius>0&&withSim.BoxRadius>0,
+                        "1.1 looks pack baked-simulation lobes (box, scale, frame) when the simulation is loaded");
+                    // A second copy of the fireball joins the main cloud as it rises: its cap ends inside the main cap.
+                    bool joined=true, seen=false;
+                    for(uint k=1;k<60;k++)
+                    {
+                        var two=BlastLayout.Create(lookTank,new Vec3(),true,false,k*7919u,null);
+                        var joinedLate=VolumeEvolution.Evaluate(lookTank,14,true,true,true,false,two);
+                        if(!joinedLate.Lobe1.Sim) continue; seen=true;
+                        joined&=joinedLate.Lobe1.SimCapTop<=joinedLate.Lobe0.SimCapTop+1e-9&&joinedLate.Lobe1.SimCapTop>=joinedLate.Lobe0.SimCapLow-1e-9;
+                    }
+                    Check(seen&&joined,"A second copy of the fireball rises into the main cloud instead of hanging under it as a separate cloud");
+                    lookTank.Look=LookProfile.Classic();
+                    var old=VolumeEvolution.Evaluate(lookTank,1.0,true,true,true,false,lookLayout);
+                    Check(!old.Sim&&!old.Lobe0.Sim&&VolumeEvolution.Motion(old).W==0,"The Classic look never uses the baked simulation");
+                }
+                finally { VolumeEvolution.UseSim=false; }
+                lookTank.Look=LookProfile.Classic();
+            }
+            {
+                lookTank.Look=LookProfile.Classic();
+                var oldFire=Residue.Plan(lookTank,true,false,60);
+                lookTank.Look=LookProfile.Default(LookKind.Tank);
+                var newFire=Residue.Plan(lookTank,true,false,60);
+                Check(oldFire.HasFire&&oldFire.Delay==0&&oldFire.Patchy==0&&Residue.FireLevel(oldFire,0.9)>0&&
+                    newFire.Delay>0.5&&newFire.Patchy>0&&Residue.FireLevel(newFire,newFire.Delay*0.9)==0&&Residue.FireLevel(newFire,newFire.Delay+newFire.Ramp)>0.5,
+                    "1.1 ground fires take hold after the fireball, 1.0 fires keep their instant start");
+                VolumeEvolution.UseSim=true;
+                try
+                {
+                    var gainNew=VolumeEvolution.Evaluate(lookTank,0.3,true,true,true,false,lookLayout);
+                    lookTank.Look=LookProfile.Classic();
+                    var gainOld=VolumeEvolution.Evaluate(lookTank,0.3,true,true,true,false,lookLayout);
+                    Check(gainNew.ProxyGain>=1&&gainOld.ProxyGain==0&&VolumeEvolution.ShockRimGain(gainOld)==1&&VolumeEvolution.ShockRimGain(gainNew)>0,
+                        "The shock and dust keep their optical depth in the larger 1.1 proxy box; Classic is untouched");
+                    lookTank.Look=LookProfile.Default(LookKind.Tank);
+                    var gwEarly=VolumeEvolution.Evaluate(lookTank,0.3,true,true,true,false,lookLayout);
+                    var waveLate=VolumeEvolution.Evaluate(lookTank,0.35,true,true,true,false,lookLayout);
+                    var gwGone=VolumeEvolution.Evaluate(lookTank,6.0,true,true,true,false,lookLayout);
+                    lookTank.Look=LookProfile.Classic();
+                    var waveOld=VolumeEvolution.Evaluate(lookTank,0.35,true,true,true,false,lookLayout);
+                    Check(waveLate.ShockRadius*waveLate.BoxRadius>waveOld.ShockRadius*waveOld.BoxRadius+20&&waveLate.ShockStrength>0.002&&
+                        gwGone.ShockStrength<=0.002&&gwGone.ShockRadius*gwGone.BoxRadius<4000,
+                        "The 1.1 blast front (the ground's dust ring, the jolt) runs on at the speed of sound and fades within a few hundred metres");
+                    // In the air an ordinary blast's wave is the 1.0 ring again (its timeline, not the front above).
+                    Vec4 ringShock,ringHaze; VolumeEvolution.Distortion(waveLate,0,out ringShock,out ringHaze);
+                    Check(ringShock.X==waveLate.RingRadius&&waveLate.RingRadius>0&&
+                        Math.Abs(waveLate.RingRadius*waveLate.BoxRadius-waveOld.ShockRadius*waveOld.BoxRadius)<waveOld.ShockRadius*waveOld.BoxRadius*0.6,
+                        "An ordinary blast's wave in the air is drawn as the 1.0 ring");
+                    // A nuclear blast's too, on its front (the speed of sound, with its dust wall and the jolt).
+                    var ringNuke=new FxPlan{ Atmosphere=1, Kind=EventKind.GroundImpact, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(ringNuke,new WarheadInfo{ Kind=WarheadKind.Nuke, TntKg=20e6, RangeM=900 });
+                    var ringNukeLayout=BlastLayout.Create(ringNuke,new Vec3(),true,false,77,null);
+                    var nukeWave=VolumeEvolution.Evaluate(ringNuke,4,true,true,true,false,ringNukeLayout);
+                    Vec4 nukeShock,nukeHaze; VolumeEvolution.Distortion(nukeWave,0,out nukeShock,out nukeHaze);
+                    var nukeFar=VolumeEvolution.Evaluate(ringNuke,40,true,true,true,false,ringNukeLayout);
+                    Check(nukeShock.X==nukeWave.ShockRadius&&nukeShock.Y>0&&VolumeEvolution.ShockRimGain(nukeWave)>0&&nukeHaze.X==0&&!VolumeEvolution.DistortionVisible(nukeFar,0),
+                        "A nuclear blast's wave in the air is the 1.0 ring too, on its front, gone past its reach (no shimmer pass)");
+                    var nukeWide=VolumeEvolution.Evaluate(ringNuke,8,true,true,true,false,ringNukeLayout);
+                    Check(VolumeEvolution.RingOutOfView(nukeWide,600,1.2)&&!VolumeEvolution.RingOutOfView(nukeWide,20000,1.2)&&!VolumeEvolution.RingOutOfView(waveLate,1,1.2),
+                        "A nuclear ring that has swept past the edges of the view is no longer drawn (an ordinary ring always is)");
+                    lookTank.Look=LookProfile.Default(LookKind.Tank);
+                    var shapeA=BlastLayout.Create(lookTank,new Vec3(),true,false,11,null); var shapeB=BlastLayout.Create(lookTank,new Vec3(),true,false,222,null);
+                    var oneA=VolumeEvolution.Evaluate(lookTank,1.5,true,true,true,false,shapeA); var oneB=VolumeEvolution.Evaluate(lookTank,1.5,true,true,true,false,shapeB);
+                    Check(oneA.Sim&&oneB.Sim&&(Math.Abs(oneA.SimShape.X-oneB.SimShape.X)>1e-3||Math.Abs(oneA.SimShape.W-oneB.SimShape.W)>1e-3)&&
+                        oneA.SimShape.X>=0.78/1.32-1e-9&&oneA.SimShape.X<=1.28&&Math.Abs(oneA.Lobe0.Center.Y-oneB.Lobe0.Center.Y)>1e-4,
+                        "Two explosions of the same part get their own fireball character (height, lean, raggedness)");
+                    FireSim.GroundLoaded=FireSim.GroundRuns.Length; FireSim.AirLoaded=FireSim.AirRuns.Length;
+                    var groundSeen=new int[FireSim.GroundRuns.Length]; var airSeen=new int[FireSim.AirRuns.Length];
+                    for(uint k=1;k<=80;k++)
+                    {
+                        groundSeen[VolumeEvolution.Evaluate(lookTank,1.5,true,true,true,false,BlastLayout.Create(lookTank,new Vec3(),true,false,k*7919u,null)).SimRun]++;
+                        airSeen[VolumeEvolution.Evaluate(lookTank,1.5,true,true,false,false,BlastLayout.Create(lookTank,new Vec3(),false,false,k*7919u,null)).SimRun]++;
+                    }
+                    bool everyShape=true; foreach(int seenCount in groundSeen) everyShape&=seenCount>3; foreach(int seenCount in airSeen) everyShape&=seenCount>3;
+                    FireSim.GroundLoaded=1; FireSim.AirLoaded=1;
+                    var onlyFirst=VolumeEvolution.Evaluate(lookTank,1.5,true,true,true,false,BlastLayout.Create(lookTank,new Vec3(),true,false,3*7919u,null));
+                    Check(everyShape&&onlyFirst.SimRun==0,"Explosions of one kind take every baked fireball shape (four on the ground, two in the air), and only the loaded ones");
+                    bool kindsVary=true;
+                    foreach(WarheadKind runKind in new[]{WarheadKind.Shell,WarheadKind.HighExplosive,WarheadKind.Bomb,WarheadKind.Structure,WarheadKind.Thermobaric,WarheadKind.None})
+                        foreach(TankCharacter runChar in new[]{TankCharacter.Mixed,TankCharacter.Fireball,TankCharacter.Jet,TankCharacter.Flash})
+                        {
+                            var seen=new System.Collections.Generic.HashSet<int>();
+                            for(int pickIndex=0;pickIndex<20;pickIndex++) { int runIndex=FireSim.ChooseGround(runKind,runChar,(pickIndex+0.5)/20); seen.Add(runIndex); kindsVary&=runIndex>=0&&runIndex<FireSim.GroundRuns.Length; }
+                            kindsVary&=seen.Count>=2;
+                        }
+                    Check(kindsVary,"Every kind of explosion (each warhead, each tank character) has at least two fireball shapes");
+                    FireSim.NukeHave[0]=FireSim.NukeHave[1]=FireSim.NukeHave[2]=true;
+                    bool nukeOwn=FireSim.Usable(true,FireSim.NukeRun2)==FireSim.NukeRun2&&FireSim.Run(true,FireSim.NukeRun).Height>FireSim.Ground.Height&&
+                        FireSim.Usable(false,FireSim.ChooseAir(WarheadKind.Nuke,0.4))==FireSim.NukeAirRun&&!FireSim.Run(false,FireSim.NukeAirRun).Ground;
+                    FireSim.NukeHave[1]=false; bool nukeSwap=FireSim.Usable(true,FireSim.NukeRun2)==FireSim.NukeRun;
+                    FireSim.NukeHave[0]=FireSim.NukeHave[1]=FireSim.NukeHave[2]=false; bool nukeFallback=FireSim.Usable(true,FireSim.NukeRun)==0&&FireSim.Usable(false,FireSim.NukeAirRun)==0;
+                    Check(FireSim.IsNukeRun(FireSim.ChooseGround(WarheadKind.Nuke,TankCharacter.Mixed,0.3))&&nukeOwn&&nukeSwap&&nukeFallback,
+                        "A nuke takes its own baked run (taller box), and the mushroom when that run is not loaded");
+                    Func<WarheadKind,double,double> warheadSize=(kind,kg)=>{ var wp=new FxPlan{ Atmosphere=1, Kind=EventKind.Destruction, Look=LookProfile.Default(LookKind.Atmospheric) }; Warhead.Apply(wp,new WarheadInfo{ Kind=kind, TntKg=kg, RangeM=50 }); return VolumeEvolution.FireballRadius(wp); };
+                    double nukeSmall=warheadSize(WarheadKind.Nuke,1.5e6), nukeBig=warheadSize(WarheadKind.Nuke,100e6), missile=warheadSize(WarheadKind.HighExplosive,25), bomb=warheadSize(WarheadKind.Bomb,450);
+                    Check(nukeBig>2.5*nukeSmall&&nukeSmall>50&&bomb>2.5*missile&&missile>8,"Warheads scale with their power: a 100 kt nuke dwarfs a 1.5 kt one, a 450 kg bomb a 25 kg missile");
+                    var nukePlan=new FxPlan{ Atmosphere=1, Kind=EventKind.GroundImpact, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(nukePlan,new WarheadInfo{ Kind=WarheadKind.Nuke, TntKg=20e6, RangeM=900 });
+                    var nukeLayout=BlastLayout.Create(nukePlan,new Vec3(),true,false,77,null);
+                    var nukeEarly=VolumeEvolution.Evaluate(nukePlan,0.3,true,true,true,false,nukeLayout); var nukeLate=VolumeEvolution.Evaluate(nukePlan,15,true,true,true,false,nukeLayout);
+                    Check(nukeEarly.Nuke.X>=1&&nukeEarly.Nuke.X<1.05&&nukeEarly.Nuke.W>0.8&&nukeEarly.Nuke.Y<0.1&&nukeLate.Nuke.Y>0.9&&nukeLate.NukeStem.Z>0&&nukeLate.Nuke.W<0.05,
+                        "A nuclear ground burst starts white-hot, then its dust stem climbs to the cloud");
+                    var mtP=new FxPlan{ Atmosphere=1, Kind=EventKind.GroundImpact, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(mtP,new WarheadInfo{ Kind=WarheadKind.Nuke, TntKg=1.2e9, RangeM=900 });
+                    var mtL=BlastLayout.Create(mtP,new Vec3(),true,false,117,null); mtL.NukeHumid=true; mtL.NukeWilson=true;
+                    var mtW=VolumeEvolution.Evaluate(mtP,3,true,true,true,false,mtL);
+                    Check(mtL.NukeThermo&&mtW.NukeWilson.X>0.001&&mtW.NukeWilson.Y>0.5&&Math.Abs(mtW.NukeWilson.X-mtW.ShockRadius)<1e-9,
+                        "A megaton burst in moist air flashes a Wilson cloud at its blast wave's front");
+                    // Real cloud dimensions (Glasstone fig. 2.16): top ~3 km x kt^0.3, cap radius ~0.3 of it; it lasts minutes.
+                    FireSim.NukeHave[0]=FireSim.NukeHave[1]=FireSim.NukeHave[2]=true;   // (as in the game: the nuclear runs loaded)
+                    var nukeSettled=VolumeEvolution.Evaluate(nukePlan,180,true,true,true,false,nukeLayout);
+                    double capTopM=nukeSettled.NukeIce.W*nukeSettled.BoxRadius, capRM=nukeSettled.NukeIce.Y*nukeSettled.BoxRadius;
+                    Vec4 settledShock,settledHaze; VolumeEvolution.Distortion(nukeSettled,1,out settledShock,out settledHaze);
+                    Check(capTopM>0.75*nukeLayout.NukeTop&&capTopM<1.08*nukeLayout.NukeTop&&nukeLayout.NukeTop>6500&&nukeLayout.NukeTop<8500&&
+                        capRM>0.2*capTopM&&capRM<0.42*capTopM&&nukeSettled.Fade>0.5&&VolumeEvolution.VolumeDuration(nukePlan)>=220&&
+                        settledHaze.X*nukeSettled.BoxRadius<=0.61&&FireSim.IsNukeRun(nukeSettled.SimRun)&&nukeSettled.NukeCap.X>0.99&&nukeEarly.NukeCap.X<0.01,
+                        "A 20 kt cloud climbs to ~7 km with a cap ~0.3 of its height (drawn as its own shape once ripe), hangs for minutes, and its fires' shimmer stays under a metre ("+
+                        (capTopM/1000).ToString("0.0")+" km, cap "+(capRM/1000).ToString("0.0")+" km)");
+                    FireSim.NukeHave[0]=FireSim.NukeHave[1]=FireSim.NukeHave[2]=false;
+                    // The nuclear blast front stays visible for kilometres (it faded out in time, ~2 s, before reaching 1 km).
+                    double shockAt3=0, shockFar=0;
+                    for(double ta=0.25;ta<40;ta+=0.25)
+                    {
+                        var sw=VolumeEvolution.Evaluate(nukePlan,ta,true,true,true,false,nukeLayout); double m=sw.ShockRadius*sw.BoxRadius;
+                        if(m>2800&&m<3200) shockAt3=Math.Max(shockAt3,sw.ShockStrength);
+                        if(m>2*VolumeEvolution.NukeBlastReach(nukePlan)+50) shockFar=Math.Max(shockFar,sw.ShockStrength);
+                    }
+                    // the nuclear cloud's own renderer (NukeCloud): white-hot sphere, rolled cap, stem, colour.
+                    {
+                        double nb=VolumeEvolution.BoxRadius(nukePlan,nukeLayout);
+                        Func<double,NukeFrame> nkAt=ta=>NukeCloud.Evaluate(nukePlan,nukeLayout,VolumeEvolution.Evaluate(nukePlan,ta,true,true,true,false,nukeLayout),ta,nb,7,600000);
+                        NukeFrame n0=nkAt(0.2), n1=nkAt(30), n2=nkAt(150);
+                        var hiL=BlastLayout.Create(nukePlan,new Vec3(),false,false,77,null); hiL.Nuke=NukeKind.HighAir; hiL.NukeGround=3000;
+                        NukeFrame nh=NukeCloud.Evaluate(nukePlan,hiL,VolumeEvolution.Evaluate(nukePlan,30,true,true,false,false,hiL),30,nb,7,600000);
+                        Check(n0.Cap.W>0.8&&n0.Ball.W<0.05&&n1.Ball.W>0.99&&n1.Torus.Z>n0.Torus.Z&&n2.Ball.Y>n1.Ball.Y&&n2.Ball.X>n1.Ball.X&&
+                            n1.Stem.W>0.9&&n1.Stem.Z>n1.Stem.X&&nh.Stem.W==0&&nh.Skirt.Z==0&&n0.Torus.W>n1.Torus.W&&
+                            n2.Cap.X+n2.Cap.Y+n2.Cap.Z>n0.Cap.X+n0.Cap.Y+n0.Cap.Z&&n2.Ball.Y*nb>0.25*NukeCloud.Top(nukeLayout,VolumeEvolution.FireballRadius(nukePlan),VolumeEvolution.FireballDuration(nukePlan),150),
+                            "A nuclear cloud starts as a white-hot sphere, rolls into a toroidal cap on a dust stem (none after a high burst), climbs, widens and pales");
+                        // the stem trails the fireball as soon as it lifts off, rather than catching up with the cap later.
+                        {
+                            double tfN=VolumeEvolution.FireballDuration(nukePlan);
+                            NukeFrame e1=nkAt(0.8*tfN), e2=nkAt(2*tfN);
+                            double under1=e1.Ball.X-0.55*e1.Ball.Z, under2=e2.Ball.X-0.55*e2.Ball.Z;
+                            Check(e1.Stem.W>0.3&&e1.Stem.Z>=under1-1e-9&&e2.Stem.Z>=under2-1e-9&&e2.Stem.W>e1.Stem.W&&e1.Stem.Y<0.27*e1.Ball.Y,
+                                "A ground burst's dust stem trails the rising fireball from lift-off and thickens, about a fifth of the cap wide");
+                        }
+                        // the blast front's veil in the air early; a Wilson cloud in ordinary weather; at the end of its life
+                        // the cloud is sheared downwind, erodes away and its stem goes from the ground up.
+                        {
+                            double life=VolumeEvolution.VolumeDuration(nukePlan);
+                            NukeFrame air2=nkAt(2), mid=nkAt(30), end=nkAt(0.97*life);
+                            double tfW=VolumeEvolution.FireballDuration(nukePlan);
+                            var wl=BlastLayout.Create(nukePlan,new Vec3(),true,false,77,null);
+                            bool wilsonOn=wl.Humidity<=0.2||VolumeEvolution.Evaluate(nukePlan,0.3*tfW,true,true,true,false,wl).NukeWilson.Y>0.3;
+                            double shearEnd=Math.Sqrt(end.Late.Y*end.Late.Y+end.Late.Z*end.Late.Z), shearMid=Math.Sqrt(mid.Late.Y*mid.Late.Y+mid.Late.Z*mid.Late.Z);
+                            Check(air2.Air.Y==0&&air2.Air.X>0&&mid.Late.X==0&&end.Late.X>0.9&&shearEnd>3*shearMid&&end.Late.W>end.Stem.X+0.5*(end.Ball.X-end.Stem.X)&&mid.Late.W<mid.Stem.X&&wilsonOn,
+                                "A nuclear blast front races out in the air (as bent air, no veil); a Wilson cloud forms in ordinary moist air; at the end the cloud is sheared downwind, breaks up and its stem goes from the ground up");
+                            // the front runs at the speed of sound (with the jolt and BDArmory's boom); a wall of dust rides it
+                            // over the ground; a nuclear jolt is felt further and longer.
+                            double tA=3000/340.0;
+                            var atBoom=VolumeEvolution.Evaluate(nukePlan,tA,true,true,true,false,nukeLayout);
+                            NukeFrame w5=nkAt(5);
+                            Check(Math.Abs(atBoom.ShockRadius*atBoom.BoxRadius-3000)<30&&Math.Abs(Shake.Arrival(3000,1)-tA)<0.05&&w5.Wave.W>0.2&&w5.Wave.X>0&&
+                                Shake.Amplitude(7,4000,1,240,true)>2*Shake.Amplitude(7,4000,1,240)&&Shake.Duration(7,true)>Shake.Duration(7),
+                                "A nuclear blast front reaches 3 km with the boom and the jolt; a wall of dust rides it over the ground; a nuclear jolt is felt further and longer");
+                            var burn=Residue.Plan(nukePlan,true,false,60);
+                            Check(burn.ScorchRadius==0&&!burn.HasFire,"A nuclear ground burst leaves no burn mark or fire on the ground");
+                            // white condensation nearly always (a Wilson dome; rings round the stem in moist air); a long ember.
+                            int wilsons=0, ringed=0;
+                            for(uint k=1;k<=40;k++)
+                            {
+                                var cl=BlastLayout.Create(nukePlan,new Vec3(),true,false,k*2654435761u,null);
+                                if(VolumeEvolution.Evaluate(nukePlan,0.3*tfW,true,true,true,false,cl).NukeWilson.Y>0.3) wilsons++;
+                                if(cl.NukeHumid) ringed++;
+                            }
+                            NukeFrame rung=nkAt(2.2*tfW), ember=nkAt(12*tfW);
+                            Check(wilsons>=34&&ringed>=30&&(!nukeLayout.NukeHumid||rung.Pile2.X>=2&&rung.Pile2.Y>0)&&ember.Heat.W>0.02&&ember.Torus.W>0.01,
+                                "A nuclear cloud nearly always shows white condensation (a Wilson dome, rings round its stem in moist air) and keeps an ember glowing for a minute");
+                        }
+                        // In vacuum nothing lifts it: no mushroom, no stem; its gas thins out to nothing within seconds; no afterglow.
+                        var vacP=new FxPlan{ Atmosphere=0, Kind=EventKind.GroundImpact, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(vacP,new WarheadInfo{ Kind=WarheadKind.Nuke, TntKg=20e6, RangeM=900 });
+                        var vacL=BlastLayout.Create(vacP,new Vec3(),true,false,77,null);
+                        double vb=VolumeEvolution.BoxRadius(vacP,vacL), vtf=VolumeEvolution.FireballDuration(vacP);
+                        NukeFrame v1=NukeCloud.Evaluate(vacP,vacL,VolumeEvolution.Evaluate(vacP,2*vtf,true,true,true,false,vacL),2*vtf,vb,7,200000);
+                        Check(v1.Ball.W==0&&v1.Stem.W==0&&v1.Heat.Y<0.05&&v1.Heat.W==0&&n1.Heat.W>0,"A nuclear blast in vacuum makes no mushroom or stem and fades within seconds");
+                        // warheads burn briefly; hydrogen is faint; a fallen building's dust hugs the ground.
+                        Check(Warhead.FireLife(WarheadKind.HighExplosive)<1&&Warhead.FireLife(WarheadKind.HighExplosive)>=0.7&&Warhead.FireLife(WarheadKind.Bomb)<1&&Warhead.FireLife(WarheadKind.Thermobaric)==1&&Warhead.FireLife(WarheadKind.None)==1,
+                            "A high explosive's fireball burns out a little sooner than a fuel tank's or a thermobaric one's, but is a real fireball");
+                        var bldP=new FxPlan{ Atmosphere=1, Kind=EventKind.GroundImpact, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Collapse(bldP,40,30,0);
+                        var depP=new FxPlan{ Atmosphere=1, Kind=EventKind.GroundImpact, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Collapse(depP,40,15,50000);
+                        Check(BlastLayout.Create(bldP,new Vec3(),true,false,5,null).SimHugsGround&&!BlastLayout.Create(depP,new Vec3(),true,false,5,null).SimHugsGround,
+                            "A fallen building's dust rolls along the ground; a fuel store's fire still rises");
+                        // the glare is a flash then a bloom while white-hot; in moist air a pileus hood forms over the
+                        // rising cap and is gone once the cap has climbed through it.
+                        {
+                            var hp=new FxPlan{ Atmosphere=1, Kind=EventKind.GroundImpact, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(hp,new WarheadInfo{ Kind=WarheadKind.Nuke, TntKg=20e6, RangeM=900 });
+                            var hl=BlastLayout.Create(hp,new Vec3(),true,false,77,null); hl.NukeHumid=true;
+                            double hb=VolumeEvolution.BoxRadius(hp,hl), htf=VolumeEvolution.FireballDuration(hp);
+                            Func<double,NukeFrame> hAt=ta=>NukeCloud.Evaluate(hp,hl,VolumeEvolution.Evaluate(hp,ta,true,true,true,false,hl),ta,hb,7,600000);
+                            NukeFrame h1=hAt(1.2*htf), h2=hAt(30*htf), h0=hAt(0.01);
+                            Vec4 g0=NukeCloud.Glare(h0,0.01,htf), g1=NukeCloud.Glare(hAt(1.0),1.0,htf), g9=NukeCloud.Glare(hAt(8*htf),8*htf,htf), g6=NukeCloud.Glare(hAt(6),6,htf);
+                            bool hoodOver=h1.Pile0.Z>0.2&&h1.Pile0.X>h1.Ball.X+h1.Ball.Z;
+                            var dryL=BlastLayout.Create(hp,new Vec3(),true,false,77,null); dryL.NukeHumid=false;
+                            NukeFrame hd=NukeCloud.Evaluate(hp,dryL,VolumeEvolution.Evaluate(hp,1.6*htf,true,true,true,false,dryL),1.6*htf,hb,7,600000);
+                            Check(g0.Y>1&&g1.Y>0.5&&g6.Y<0.05&&g1.Z>0.3&&g9.Y+g9.Z<0.05&&hoodOver&&h2.Pile0.Z<0.01&&hd.Pile0.Z==0,
+                                "A nuclear burst's glare flashes, stays blinding for a second or more (20 kt), then blooms while white-hot; a pileus hood rises over the cap in moist air (none in dry air) and is gone once punched through");
+                        }
+                        // a nuclear flash whites out the view (strong up close, fading in seconds and with distance);
+                        // yields set clearly different cloud heights (0.25 / 1.5 / 20 kt).
+                        double fl0=NukeCloud.ScreenFlash(0.05,3000,71), fl3=NukeCloud.ScreenFlash(3,3000,71), flFar=NukeCloud.ScreenFlash(0.05,60000,71);
+                        Func<double,double> topOf=kg=>{ var tp=new FxPlan{ Atmosphere=1, Kind=EventKind.GroundImpact, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(tp,new WarheadInfo{ Kind=WarheadKind.Nuke, TntKg=kg, RangeM=900 }); return BlastLayout.Create(tp,new Vec3(),true,false,5,null).NukeTop; };
+                        double t025=topOf(0.25e6), t15=topOf(1.5e6), t20=topOf(20e6);
+                        Check(fl0>0.6&&fl3<0.15&&flFar<0.1&&NukeCloud.ScreenFlash(-1,10,71)==0&&t15>2*t025&&t20>3*t15,
+                            "A nuclear flash whites out the view and fades; a 20 kt cloud towers over a 1.5 kt one, itself over a 0.25 kt one ("+
+                            (t025/1000).ToString("0.0")+" / "+(t15/1000).ToString("0.0")+" / "+(t20/1000).ToString("0.0")+" km)");
+                    }
+                    Check(shockAt3>0.25&&shockFar<0.002,"A 20 kt blast front is still strong at 3 km and gone past twice its reach ("+shockAt3.ToString("0.00")+")");
+                    bool wholeRuns=true;
+                    foreach(var runGroup in new[]{FireSim.GroundRuns,FireSim.AirRuns})
+                        foreach(var run in runGroup)
+                            wholeRuns&=run.LastWhole>=run.Frames/3&&run.LastWhole<run.Frames&&run.Bounds[run.LastWhole*6+3]<0.95*run.Height;
+                    Check(wholeRuns,"Every baked run stops at a frame whose cloud is still whole inside its box (no flattening against the ceiling)");
+                    double lastTop=-1, lastFrame=-1; bool keepsRising=true, frameHeld=true;
+                    var riseLayout=BlastLayout.Create(lookTank,new Vec3(),true,false,11,null);
+                    for(double riseAge=1;riseAge<=20;riseAge+=0.5)
+                    {
+                        var risen=VolumeEvolution.Evaluate(lookTank,riseAge,true,true,true,false,riseLayout);
+                        double top=risen.Lobe0.SimOrigin.Y;
+                        if(riseAge>6) keepsRising&=top>=lastTop-1e-9;
+                        frameHeld&=risen.Lobe0.SimFrame<=FireSim.GroundRuns[risen.SimRun].LastWhole+1e-9&&risen.Lobe0.SimFrame>=lastFrame-1e-9;
+                        lastTop=top; lastFrame=risen.Lobe0.SimFrame;
+                    }
+                    var lateCloud=VolumeEvolution.Evaluate(lookTank,18,true,true,true,false,riseLayout);
+                    Check(keepsRising&&frameHeld&&lateCloud.Lobe0.SimAfter>1&&lateCloud.SimStem>1,
+                        "Past its last whole frame a fuel cloud holds its shape and keeps rising (no jump back, no frame past the ceiling)");
+                    var mixA=new FxPlan{ BurnableKg=1000, SmokeR=0.3, SmokeG=0.3, SmokeB=0.3, Soot=0.5, Look=LookProfile.Default(LookKind.Tank) };
+                    var mixB=new FxPlan{ BurnableKg=1000, SmokeR=0.3, SmokeG=0.3, SmokeB=0.3, Soot=0.5, Look=LookProfile.Default(LookKind.Tank) };
+                    var mixC=new FxPlan{ BurnableKg=1000, SmokeR=0.3, SmokeG=0.3, SmokeB=0.3, Soot=0.5, Look=LookProfile.Classic() };
+                    Chemistry.Vary(mixA,5); Chemistry.Vary(mixB,6); Chemistry.Vary(mixC,5);
+                    var sand=new FxPlan{ DustR=0.6, DustG=0.5, DustB=0.4, Look=LookProfile.Default(LookKind.Tank) }; Chemistry.GroundDust(sand,0.9,0.9,0.92);
+                    var grass=new FxPlan{ DustR=0.6, DustG=0.5, DustB=0.4, Look=LookProfile.Default(LookKind.Tank) }; Chemistry.GroundDust(grass,0.2,0.5,0.15);
+                    var trailSteps=new FireTrailStep[FireTrail.MaxSteps];
+                    int trailSlow=FireTrail.Plan(15,8,2000,trailSteps), trailMid=FireTrail.Plan(70,8,2000,trailSteps);
+                    double midReach=trailSteps[trailMid-1].Distance;
+                    int trailFast=FireTrail.Plan(180,8,2000,trailSteps);
+                    Check(trailSlow==0&&trailMid>=1&&trailFast>trailMid&&trailSteps[trailFast-1].Distance>midReach&&trailSteps[0].Delay>0&&trailSteps[trailFast-1].Fuel<trailSteps[0].Fuel&&
+                        FireTrail.Plan(180,8,5,trailSteps)==0,"A sideways crash throws burning fuel ahead: more and further fireballs the faster, none without fuel");
+                    // not a straight, evenly spaced line: uneven gaps, scattered to the side, different from crash to crash.
+                    {
+                        var a=new FireTrailStep[FireTrail.MaxSteps]; var b=new FireTrailStep[FireTrail.MaxSteps];
+                        int na=FireTrail.Plan(180,8,2000,a,11), nb=FireTrail.Plan(180,8,2000,b,12);
+                        bool uneven=Math.Abs((a[1].Distance-a[0].Distance)-(a[2].Distance-a[1].Distance))>0.5, aside=false, ordered=true, differs=false;
+                        for(int k=0;k<na;k++) { aside|=Math.Abs(a[k].Side)>1; differs|=Math.Abs(a[k].Side-b[k].Side)>0.5; if(k>0) ordered&=a[k].Distance>a[k-1].Distance; }
+                        Check(na==nb&&uneven&&aside&&ordered&&differs,"The fuel thrown along a crash path scatters unevenly to either side, differently each crash");
+                    }
+                    var stripA=new ResiduePlan{ FireSeconds=25, FireRadius=5, SmokeSeconds=40, FlameHeight=5 };
+                    var stripB=new ResiduePlan{ FireSeconds=20, FireRadius=3, SmokeSeconds=30, FlameHeight=4 };
+                    var joined=stripA.Joined(stripB,12);
+                    Check(joined.FireRadius==5&&joined.FireSeconds==32&&joined.SmokeSeconds>=47&&joined.FlameHeight==5,
+                        "Fuel thrown along a crash path joins the fire as a strip that burns as long as the later spill");
+                    Check(Warhead.Classify("Standard","Missile","AIM-120",20)==WarheadKind.HighExplosive&&Warhead.Classify("Standard","Missile","Mk84 bomb",400)==WarheadKind.Bomb&&
+                        Warhead.Classify("ContinuousRod","Missile","AIM-9",5)==WarheadKind.ContinuousRod&&Warhead.Classify("Nuke","Missile","x",50)==WarheadKind.Nuke&&
+                        Warhead.Classify("Standard","Bullet","30mm HE",0.1)==WarheadKind.Shell&&Warhead.Classify("Standard","Missile","Napalm canister",50)==WarheadKind.Incendiary&&
+                        Warhead.Classify("EMP","Missile","x",1)==WarheadKind.Emp,"Combat warheads are recognised: missile, bomb, rod, nuke, shell, incendiary, EMP");
+                    Check(Warhead.Classify("EMP","Other","B61",5e5)==WarheadKind.Emp&&Warhead.Classify("Nuke","Other","B61",5e5)==WarheadKind.Nuke&&
+                        Warhead.Classify("Standard","Missile","Tempest AAM",20)==WarheadKind.HighExplosive&&Warhead.Classify("Standard","Missile","EMP pod",1)==WarheadKind.Emp,
+                        "A nuclear EMP stays an EMP, and 'emp' only counts as a whole word (Tempest is a missile)");
+                    {
+                        // v40 log: the YJ-12 anti-ship missile (360 kg) was drawn as a bomb, and air bursts threw up earth.
+                        var airBomb=new FxPlan{ Atmosphere=1, Kind=EventKind.Destruction, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(airBomb,new WarheadInfo{Kind=WarheadKind.Bomb,TntKg=250,RangeM=70});
+                        var groundBomb=new FxPlan{ Atmosphere=1, Kind=EventKind.GroundImpact, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(groundBomb,new WarheadInfo{Kind=WarheadKind.Bomb,TntKg=250,RangeM=70});
+                        Check(Warhead.Classify("Standard","Missile","YJ-12 ASM",360)==WarheadKind.HighExplosive&&Warhead.Classify("Standard","Missile","AGM-84 Harpoon missile",220)==WarheadKind.HighExplosive&&
+                            Warhead.Classify("Standard","Missile","bahaMk84Bomb",430)==WarheadKind.Bomb&&Warhead.Classify("Standard","Missile","x",300)==WarheadKind.Bomb,
+                            "A heavy missile is still a missile (bombs by name, or heavy unnamed charges)");
+                        Check(airBomb.OreKg==0&&groundBomb.OreKg>0&&airBomb.Soot>groundBomb.Soot,"Only a ground burst throws up earth; an air burst stays a dark smoke ball");
+                    }
+                    {
+                        var empMissile=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(empMissile,new WarheadInfo{Kind=WarheadKind.Emp,TntKg=6,RangeM=25});
+                        var empPulse=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(empPulse,new WarheadInfo{Kind=WarheadKind.Emp,TntKg=0.1,RangeM=25});
+                        Check(empMissile.BurnableKg>0&&empMissile.ElectricFraction>0.3&&empPulse.BurnableKg==0&&empPulse.ElectricFraction==1,
+                            "An EMP missile with a real charge blows up with an electric flash; a pure pulse stays a flash");
+                        var lone=new DestructionEvent(Part(1.225),EventKind.GroundImpact,12.5);
+                        EventCluster single=EventCluster.Single(77,lone,4.6);
+                        Check(single.Id==77&&single.Members==1&&single.Representative==lone&&single.Ground&&single.FirstTime==12.5&&single.RepresentativeScore==4.6,
+                            "A combat detonation is spawned on its own at once (never merged, queued or dropped by the clusterer)");
+                        var hangar=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Collapse(hangar,45,22,0);
+                        var depot=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Collapse(depot,25,14,20000);
+                        var hangarL=BlastLayout.Create(hangar,new Vec3(),true,false,5,null);
+                        var hangarR=Residue.Plan(hangar,true,false,45);
+                        var depotR=Residue.Plan(depot,true,false,45);
+                        Check(hangar.Warhead==WarheadKind.Structure&&hangar.OreKg>0&&hangar.Soot<0.2&&hangar.SmokeR>0.6&&depot.Soot>0.4&&depot.BurnableKg>hangar.BurnableKg&&
+                            hangarL.SingleCloud&&hangarL.SimTall<0.6&&hangarL.SimHugsGround&&VolumeEvolution.VolumeDuration(hangar)>=29&&!hangarR.HasFire&&hangarR.ScorchRadius==0&&depotR.HasFire&&depotR.ScorchRadius<=25,
+                            "A falling building is a broad, low, pale dust cloud that hangs; only a fuel store burns on");
+                        var sooty2=new FxPlan{ Look=LookProfile.Default(LookKind.Tank), SmokeR=0.3, SmokeG=0.29, SmokeB=0.28, Kind=EventKind.GroundImpact, DustR=0.6, DustG=0.5, DustB=0.4 };
+                        var pale2=new FxPlan{ Look=LookProfile.Default(LookKind.Tank), SmokeR=0.85, SmokeG=0.85, SmokeB=0.84 };
+                        Check(Chemistry.SmokeMix(sooty2,0.1).W>0.4&&Chemistry.SmokeMix(sooty2,0.1).X>0.4&&Chemistry.SmokeMix(sooty2,0.5).X>0.5&&Chemistry.SmokeMix(sooty2,0.9).X>0.75&&
+                            Chemistry.SmokeMix(pale2,0.5).X<0.6&&Chemistry.SmokeMix(new FxPlan{ SmokeR=0.3 },0.5).W==0,
+                            "One explosion carries several smokes: earth, grey combustion smoke or steam in sooty smoke, darker residue in pale smoke");
+                        var fullTank=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank), BurnableKg=1500, Fill=0.95, PartKind=PartKind.LiquidTank };
+                        var halfTank=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank), BurnableKg=1500, Fill=0.45, PartKind=PartKind.LiquidTank };
+                        var dryTank=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank), BurnableKg=1500, Fill=0.05, PartKind=PartKind.LiquidTank };
+                        var bigStage=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank), BurnableKg=9000, Fill=0.9, PartKind=PartKind.LiquidTank };
+                        Check(BlastLayout.ChooseCharacter(fullTank,0.1)==TankCharacter.Fireball&&BlastLayout.ChooseCharacter(halfTank,0.1)==TankCharacter.Jet&&
+                            BlastLayout.ChooseCharacter(dryTank,0.1)==TankCharacter.Flash&&BlastLayout.ChooseCharacter(bigStage,0.1)==TankCharacter.Chain&&
+                            BlastLayout.ChooseCharacter(fullTank,0.95)==TankCharacter.Mixed,
+                            "Tanks let go by how full they were: fireball, jet, chain, vapour flash, or the mixed look by chance");
+                        int kinds=0; var seenKinds=new System.Collections.Generic.HashSet<TankCharacter>();
+                        for(uint k=1;k<60;k++) seenKinds.Add(BlastLayout.Create(fullTank,new Vec3(),true,false,k,null).Character);
+                        kinds=seenKinds.Count;
+                        var classicTank=new FxPlan{ Atmosphere=1, BurnableKg=1500, Fill=0.95, PartKind=PartKind.LiquidTank };
+                        Check(kinds>=3&&BlastLayout.Create(classicTank,new Vec3(),true,false,3,null).Character==TankCharacter.Mixed,
+                            "The same full tank does not always let go the same way; the 1.0 look keeps its layout");
+                        Aftermath.SceneWind=new Vec3(2,0,0);
+                        Vec3 w1=Aftermath.Wind(11,1,true), w2=Aftermath.Wind(977,1,true), w0=Aftermath.Wind(11,1,false);
+                        var windTank=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank), BurnableKg=1500, Fill=0.95, PartKind=PartKind.LiquidTank };
+                        bool downwind=true; for(uint k=1;k<30;k++) { var lw=BlastLayout.Create(windTank,new Vec3(),true,false,k,null); if(lw.Character==TankCharacter.Jet) continue; downwind&=lw.SimLeanX>=0&&Math.Abs(lw.SimLeanZ)<=0.6*lw.SimLeanX+1e-9; }
+                        Aftermath.SceneWind=new Vec3();
+                        Check(w1.X>1.4&&w2.X>1.4&&Math.Abs(w1.Z)<0.6&&Math.Abs(w2.Z)<0.6&&w0.Length>0&&Aftermath.Wind(11,0,true).Length<1e-9&&downwind,
+                            "One breeze for the scene: every plume and cloud leans downwind (only the 1.0 look keeps its per-event breeze)");
+                        var sooty=new FxPlan{ Look=LookProfile.Default(LookKind.Tank), Soot=0.8 };
+                        var styles=new System.Collections.Generic.HashSet<SmokeStyle>(); for(int k=0;k<20;k++) styles.Add(SmokeStyles.Choose(sooty,k/20.0));
+                        double rc,sc,dc,rk,sk,dk; SmokeStyles.Shape(SmokeStyle.Column,out rc,out sc,out dc); SmokeStyles.Shape(SmokeStyle.Creep,out rk,out sk,out dk);
+                        Check(styles.Count==4&&SmokeStyles.Choose(new FxPlan{ Soot=0.8 },0.1)==SmokeStyle.None&&rc>1&&sc<1&&rk<0.6&&dk>1.5&&
+                            SmokeStyles.Pulse(SmokeStyle.Column,3,0)==1&&SmokeStyles.Pulse(SmokeStyle.Puffing,0.7,0)>1&&SmokeStyles.Pulse(SmokeStyle.Puffing,2.1,0)<0.3,
+                            "Burning wrecks smoke in four ways (column, billows, creeping haze, puffs); the 1.0 look keeps its plume");
+                        var bigBomb=new FxPlan{ Atmosphere=1, Kind=EventKind.GroundImpact, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(bigBomb,new WarheadInfo{Kind=WarheadKind.Bomb,TntKg=250,RangeM=70});
+                        var smallPop=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank), VisualEnergyScore=3 };
+                        double waveReach=VolumeEvolution.GroundWaveReach(bigBomb,true,false);
+                        var bombLayout=BlastLayout.Create(bigBomb,new Vec3(),true,false,4,null);
+                        Vec4 dustEarly=VolumeEvolution.GroundWave(bigBomb,VolumeEvolution.Evaluate(bigBomb,0.3,true,true,true,false,bombLayout),waveReach);
+                        Vec4 dustLater=VolumeEvolution.GroundWave(bigBomb,VolumeEvolution.Evaluate(bigBomb,1.5,true,true,true,false,bombLayout),waveReach);
+                        Vec4 dustGone=VolumeEvolution.GroundWave(bigBomb,VolumeEvolution.Evaluate(bigBomb,40,true,true,true,false,bombLayout),waveReach);
+                        Check(waveReach>=40&&VolumeEvolution.GroundWaveReach(bigBomb,false,false)==0&&VolumeEvolution.GroundWaveReach(bigBomb,true,true)==0&&
+                            VolumeEvolution.GroundWaveReach(smallPop,true,false)==0&&dustEarly.Z>0.2&&dustLater.X>dustEarly.X&&dustLater.Z>0.2&&dustGone.Z<0.01,
+                            "A big ground blast lifts a sheet of dust that runs out with its wave and settles after a while (not in the air, on water, or for small blasts)");
+                        bombLayout.Humidity=1; var dry=BlastLayout.Create(bigBomb,new Vec3(),true,false,4,null); dry.Humidity=0;
+                        double tauB=VolumeEvolution.TimeScale(bigBomb);
+                        Check(VolumeEvolution.Condensation(bigBomb,bombLayout,0.6*tauB,tauB,1,bigBomb.Look)>0.2&&VolumeEvolution.Condensation(bigBomb,dry,0.6*tauB,tauB,1,bigBomb.Look)==0&&
+                            VolumeEvolution.Condensation(bigBomb,bombLayout,3*tauB,tauB,1,bigBomb.Look)==0&&VolumeEvolution.Condensation(bigBomb,bombLayout,0.6*tauB,tauB,1,LookProfile.Classic())==0,
+                            "A big blast in humid air flashes a brief condensation cloud (not in dry air, not later, not in the 1.0 look)");
+                        var nukeP2=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(nukeP2,new WarheadInfo{Kind=WarheadKind.Nuke,TntKg=20000,RangeM=900});
+                        Check(Aftermath.LightningRate(nukeP2,5)>1&&Aftermath.LightningRate(nukeP2,1)==0&&Aftermath.LightningRate(nukeP2,30)==0&&Aftermath.LightningRate(bigBomb,5)==0,
+                            "Lightning flickers in the cloud of very large blasts only (a nuke, not a bomb), from a second and a half on");
+                        Check(Shake.Amplitude(7,50,1,20)>0.5&&Shake.Amplitude(7,50,1,20)<=2.5&&Shake.Amplitude(7,2000,1,20)<Shake.Amplitude(7,200,1,20)&&
+                            Shake.Amplitude(7,50,0,20)==0&&Shake.Amplitude(2,50,1,20)==0&&Math.Abs(Shake.Arrival(680,1)-2)<1e-9&&
+                            Shake.Envelope(-0.1,1)==0&&Shake.Envelope(0.05,1)>0.7&&Shake.Envelope(0.9,1)<0.1&&Shake.Envelope(1.1,1)==0,
+                            "Camera shake: strong close by, weaker far away, none in vacuum or for small pops, arriving at the speed of sound");
+                        var cine=new FxSettings(); cine.ApplyProfile(0); var bal=new FxSettings(); bal.ApplyProfile(1); var light=new FxSettings(); light.ApplyProfile(2);
+                        Check(cine.Quality==Quality.Ultra&&cine.VolumeDivisor==1&&!cine.Adaptive&&bal.VolumeDivisor==2&&bal.Adaptive&&light.Quality==Quality.Medium&&
+                            light.DebrisTriangles<cine.DebrisTriangles&&light.Profile==2&&FxSettings.PhotoSpeed(0)==1&&FxSettings.PhotoSpeed(1)<1&&FxSettings.PhotoSpeed(2)==0,
+                            "Quick setups (cinematic, balanced, performance) and the photo mode speeds");
+                        Check(Chemistry.Classify(0.85,0.87,0.9)==GroundKind.Snow&&Chemistry.Classify(0.3,0.45,0.2)==GroundKind.Grass&&Chemistry.Classify(0.75,0.62,0.42)==GroundKind.Sand&&
+                            Chemistry.Classify(0.45,0.45,0.44)==GroundKind.Rock&&Chemistry.Classify(0.45,0.36,0.3)==GroundKind.Soil,"The ground under a blast is read from its colour: snow, grass, sand, rock or soil");
+                        var snowy=new FxPlan{ Look=LookProfile.Default(LookKind.Tank) }; Chemistry.GroundDust(snowy,0.85,0.87,0.9);
+                        Check(snowy.Surface==GroundKind.Snow&&snowy.DustR>0.85&&snowy.DustB>0.9,"A blast on snow throws up white powder");
+                        PartSnapshot deep=Part(1.225,new[]{R("LiquidFuel",900,900),R("Oxidizer",1100,1100)}); 
+                        var deepEnv=new EnvironmentContext("Kerbin",1.225,101.3,9.81,-20,true,false,true,new Vec3(0,1,0));
+                        var deepPart=new PartSnapshot(9,9,Guid.Empty,"tank",new Vec3(),new Vec3(0,-5,0),new Vec3(0,-5,0),new Vec3(),new Vec3(1,2,1),2000,300,new string[0],deep.Resources,deepEnv);
+                        var under=VisualEnergy.Calculate(new DestructionEvent(deepPart,EventKind.WaterImpact,0),new ResourceClassifier(),new FxSettings());
+                        double fireBefore=under.FireFraction; under.Look=LookProfile.Default(LookKind.Tank); Chemistry.Apply(under);
+                        var underR=Residue.Plan(under,false,true,45);
+                        Check(Math.Abs(under.Depth-19.8)<1e-9&&under.FireFraction<0.1*fireBefore+1e-9&&under.Soot==0&&Splash.DomeRadius(under)>0&&Splash.DomeDelay(under)>0&&
+                            Splash.ColumnHeight(under)>0&&!underR.HasFire,"Under water a blast lifts a white dome and a column, without a fireball or a fire on the surface");
+                        var floating=new FxPlan{ Look=LookProfile.Default(LookKind.Tank), Atmosphere=1, FireFraction=0.9, BurnableKg=900, Soot=0.6, Kind=EventKind.WaterImpact, Radius=4 };
+                        var slickR=Residue.Plan(floating,false,true,45); floating.Look=LookProfile.Classic(); var plainR=Residue.Plan(floating,false,true,45);
+                        Check(Splash.Slick(new FxPlan{ Look=LookProfile.Default(LookKind.Tank), Soot=0.6 })&&slickR.HasFire&&slickR.FireRadius>plainR.FireRadius&&slickR.FlameHeight<plainR.FlameHeight,
+                            "Burning fuel floating on the water spreads into a wide, low slick");
+                        // The models run once at flight start (compiled before the first blast) without failing.
+                        bool warmed=true; try { Warmup.Run(); } catch(Exception) { warmed=false; }
+                        Check(warmed,"The explosion models warm up at flight start without failing");
+                        // 1.1: a water impact's splash as a volume (crown, jet, spray, surge, foam).
+                        var seaVol=Plan(Part(1.225,new[]{R("LiquidFuel",2000),R("Oxidizer",2500)},speed:120,mass:20000),EventKind.WaterImpact); seaVol.Look=LookProfile.Default(LookKind.Tank);
+                        var seaOld=Plan(Part(1.225,new[]{R("LiquidFuel",2000),R("Oxidizer",2500)},speed:120,mass:20000),EventKind.WaterImpact); seaOld.Look=LookProfile.Classic();
+                        var landVol=Plan(Part(1.225,new[]{R("LiquidFuel",2000),R("Oxidizer",2500)},speed:120,mass:20000),EventKind.GroundImpact); landVol.Look=LookProfile.Default(LookKind.Tank);
+                        Check(WaterSplash.Applies(seaVol)&&!WaterSplash.Applies(seaOld)&&!WaterSplash.Applies(landVol)&&!WaterSplash.Applies(null),
+                            "A water impact's splash is a volume in the 1.1 look only, and only on the water");
+                        double hSea=Splash.ColumnHeight(seaVol), endSea=WaterSplash.Duration(seaVol,9.81);
+                        var still=new Vec3(0,0,0);
+                        SplashFrame sp0=WaterSplash.Evaluate(seaVol,0.3,9.81,still,still,7), sp1=WaterSplash.Evaluate(seaVol,1.5,9.81,still,still,7);
+                        Check(sp0.Visible&&sp0.Crown.W>0&&sp0.Sheet.Y>0&&sp0.Reach>sp0.Crown.X&&sp0.Top>0&&sp1.Reach>sp0.Reach&&sp1.Top>sp0.Top,
+                            "The crown rises and spreads from the moment of impact, inside its box");
+                        // A quick burst: gone within its life (seconds), leaving a light veil of spray and foam.
+                        SplashFrame spGone=WaterSplash.Evaluate(seaVol,sp0.Crown.Z+0.1,9.81,still,still,7);
+                        Check(sp0.Crown.Z<=2.6&&spGone.Visible&&spGone.Sheet.Y==0&&spGone.Spray.W>0&&spGone.Foam.Z>0&&spGone.Surge.W==0,
+                            "A crash into the sea throws a quick burst of spray that is gone within a couple of seconds, leaving spray and foam");
+                        // No water spout up the middle of a surface impact; a warhead's burst is a steep plume.
+                        bool jetSeen=false; for(double ta=0.2;ta<8;ta+=0.2) if(WaterSplash.Evaluate(seaVol,ta,9.81,still,still,7).Jet.Z>0) jetSeen=true;
+                        var seaBomb=Plan(Part(1.225,null,speed:220,mass:400),EventKind.WaterImpact); seaBomb.Look=LookProfile.Default(LookKind.Tank); seaBomb.Warhead=WarheadKind.Bomb;
+                        bool bombJet=false; for(double ta=0.2;ta<8;ta+=0.2) if(WaterSplash.Evaluate(seaBomb,ta,9.81,still,still,7).Jet.Z>0) bombJet=true;
+                        SplashFrame bomb1=WaterSplash.Evaluate(seaBomb,0.6,9.81,still,still,7), crash1=WaterSplash.Evaluate(seaVol,0.6,9.81,still,still,7);
+                        Check(!jetSeen&&!bombJet&&bomb1.Sheet.W==1&&crash1.Sheet.W==0&&bomb1.Top/bomb1.Crown.X>crash1.Top/crash1.Crown.X*1.4,
+                            "A surface impact throws no water spout up the middle; a warhead's burst rises as a steep plume, a crash's spreads");
+                        var diveEnv=new EnvironmentContext("Kerbin",1.225,101.3,9.81,-6,true,false,true,new Vec3(0,1,0));
+                        var divePart=new PartSnapshot(10,10,Guid.Empty,"missile",new Vec3(),new Vec3(0,-300,0),new Vec3(0,-300,0),new Vec3(),new Vec3(0.3,3,0.3),300,300,new string[0],new ResourceSnapshot[0],diveEnv);
+                        var dive=VisualEnergy.Calculate(new DestructionEvent(divePart,EventKind.WaterImpact,0),new ResourceClassifier(),new FxSettings());
+                        dive.Look=LookProfile.Default(LookKind.Tank);
+                        Check(dive.Depth==0&&Splash.DomeRadius(dive)==0,"A missile found a frame under the sea it hit at 300 m/s is a surface impact, not an underwater blast");
+                        // Ground marks: a warhead's crater, a fuel burn, a grazing crash drawn out along its path; the 1.0 mark.
+                        var markBomb=new FxPlan{ Look=LookProfile.Default(LookKind.Tank), Warhead=WarheadKind.Bomb, ImpactSpeed=200 };
+                        var markBurn=new FxPlan{ Look=LookProfile.Default(LookKind.Tank), FireFraction=0.8, ImpactSpeed=20 };
+                        var markSlide=new FxPlan{ Look=LookProfile.Default(LookKind.Tank), FireFraction=0.1, ImpactSpeed=180 };
+                        Vec4 lookBomb=Residue.ScorchLook(markBomb,0,-200,0), lookBurn=Residue.ScorchLook(markBurn,0,-20,0), lookSlide=Residue.ScorchLook(markSlide,0,-40,170);
+                        Check(lookBomb.X==1&&lookBomb.Y==1&&lookBomb.Z<0.05&&lookBurn.Y==0&&lookSlide.Y>0.5&&lookSlide.Z>0.6&&Math.Abs(lookSlide.W-Math.PI/2)<1e-9&&
+                            Residue.ScorchLook(new FxPlan{ Look=LookProfile.Classic(), Warhead=WarheadKind.Bomb },0,-200,0).X==0,
+                            "Ground marks: a warhead leaves a crater, fuel a burn, a grazing crash a gouge drawn out along its path; the 1.0 look keeps its mark");
+                        Check(endSea>5&&endSea<90&&!WaterSplash.Evaluate(seaVol,endSea+0.01,9.81,still,still,7).Visible&&WaterSplash.Evaluate(seaVol,endSea-6,9.81,still,still,7).Foam.Z>0,
+                            "The splash ends, its foam last, within a minute and a half");
+                        SplashFrame lean=WaterSplash.Evaluate(seaVol,1,9.81,new Vec3(80,0,0),still,7), again=WaterSplash.Evaluate(seaVol,1,9.81,new Vec3(80,0,0),still,7);
+                        Check(lean.Drift.Y>0.1&&Math.Abs(lean.Drift.Z)<1e-9&&sp1.Drift.Y==0&&lean.Reach==again.Reach&&lean.Crown.Y==again.Crown.Y,
+                            "A grazing impact throws its crown forward; the same splash is drawn the same way");
+                        under.Look=LookProfile.Default(LookKind.Tank);
+                        SplashFrame domeUp=WaterSplash.Evaluate(under,0.1,9.81,still,still,7), plumes=WaterSplash.Evaluate(under,1.5,9.81,still,still,7);
+                        Check(WaterSplash.Applies(under)&&domeUp.Dome.Z>0&&domeUp.Crown.W==0&&plumes.Dome.Z==0&&plumes.Jet.Y>0&&plumes.Foam.W==1,
+                            "Under water a white dome rises first, then bursts into plumes");
+                        Check(Aftermath.Afterheat(20,25)>0.2&&Aftermath.Afterheat(20,60)<Aftermath.Afterheat(20,25)&&Aftermath.Afterheat(20,90)==0&&Aftermath.Afterheat(0,25)==0&&Aftermath.Afterheat(20,10)==0,
+                            "Heat shimmer lingers over a wreck for about a minute after its fire is out");
+                        var bigCrash=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank), BurnableKg=3000 };
+                        var popsOut=new Aftermath.Pop[5]; int anyPops=0, maxPops=0;
+                        for(uint k=1;k<40;k++) { int n=Aftermath.Pops(bigCrash,k,8,popsOut); if(n>0) anyPops++; maxPops=Math.Max(maxPops,n); for(int i=0;i<n;i++) if(popsOut[i].At<2||popsOut[i].At>15||popsOut[i].Size<=0) maxPops=99; }
+                        Check(anyPops>20&&maxPops<=5&&Aftermath.Pops(new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank), BurnableKg=100 },3,8,popsOut)==0&&
+                            Aftermath.Pops(new FxPlan{ Atmosphere=1, Look=LookProfile.Classic(), BurnableKg=3000 },3,8,popsOut)==0,
+                            "Most big burning wrecks let off a few secondary explosions between 2 and 15 s (not small ones, not the 1.0 look)");
+                        var grassFire=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank), FireFraction=0.9, BurnableKg=900, Soot=0.5, Radius=3, Surface=GroundKind.Grass };
+                        var grassR=Residue.Plan(grassFire,true,false,90); grassFire.Surface=GroundKind.Sand; var sandR=Residue.Plan(grassFire,true,false,90);
+                        Check(Aftermath.CreepSpeed(new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank), Surface=GroundKind.Grass })>0&&Aftermath.CreepSpeed(grassFire)==0&&
+                            grassR.SmokeSeconds>sandR.SmokeSeconds+20,"A fire in grassFire creeps outward and keeps smoking for about a minute; not on sand");
+                    }
+                    {
+                        double sx,sz,sr,hx,hz,hr;
+                        VolumeEvolution.ShadowDrape(40,0.6,0.62,0,out sx,out sz,out sr);   // sun 46 deg up toward +x
+                        VolumeEvolution.ShadowDrape(40,0,1,0,out hx,out hz,out hr);         // sun overhead
+                        Check(sx<-10&&Math.Abs(sz)<1e-9&&sr>40*0.85+9&&Math.Abs(hx)<1e-9&&Math.Abs(hr-34)<1e-9,
+                            "The ground shadow is laid out away from the sun and wide enough for a tall cloud's shadow (centred when the sun is overhead)");
+                    }
+                    Check(Warhead.Replaces(new WarheadInfo{Kind=WarheadKind.Shell,TntKg=0.05})&&Warhead.Replaces(new WarheadInfo{Kind=WarheadKind.Kinetic,TntKg=5})&&
+                        Warhead.Small(new WarheadInfo{Kind=WarheadKind.Shell,TntKg=0.05})&&!Warhead.Small(new WarheadInfo{Kind=WarheadKind.Shell,TntKg=1})&&
+                        Warhead.Small(new WarheadInfo{Kind=WarheadKind.Kinetic,TntKg=5})&&!Warhead.Small(new WarheadInfo{Kind=WarheadKind.Bomb,TntKg=250})&&
+                        Warhead.BurstSize(0.1,0)>0.6&&Warhead.BurstSize(0,30)<Warhead.BurstSize(0,120)&&Warhead.BurstSize(0,30)>=0.15,
+                        "Every combat detonation is drawn by VEFX: small shells and kinetic hits as a light burst sized by charge or calibre");
+                    var heP=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(heP,new WarheadInfo{Kind=WarheadKind.HighExplosive,TntKg=20,RangeM=30});
+                    var bombP=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(bombP,new WarheadInfo{Kind=WarheadKind.Bomb,TntKg=250,RangeM=70});
+                    var nukeP=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(nukeP,new WarheadInfo{Kind=WarheadKind.Nuke,TntKg=1e6,RangeM=900});
+                    var napP=new FxPlan{ Atmosphere=1, Look=LookProfile.Default(LookKind.Tank) }; Warhead.Apply(napP,new WarheadInfo{Kind=WarheadKind.Incendiary,TntKg=60,RangeM=40});
+                    Check(VolumeEvolution.FireballRadius(bombP)>VolumeEvolution.FireballRadius(heP)&&VolumeEvolution.FireballRadius(nukeP)>=30&&VolumeEvolution.FireballRadius(nukeP)>VolumeEvolution.FireballRadius(bombP)&&heP.WhiteFlame<0.5&&
+                        !Residue.Plan(heP,true,false,60).HasFire&&Residue.Plan(heP,true,false,60).ScorchRadius>0&&Residue.Plan(napP,true,false,60).HasFire,
+                        "Warheads scale with their charge; plain explosives scorch the ground, incendiaries leave it burning");
+                    var poolA=new ResiduePlan{ FireSeconds=30, FireRadius=6, SmokeSeconds=50, FlameHeight=5, ScorchRadius=8 };
+                    var poolB=new ResiduePlan{ FireSeconds=20, FireRadius=6, SmokeSeconds=40, FlameHeight=6, ScorchRadius=8 };
+                    var fedPool=poolA.Fed(poolB,10);
+                    Check(fedPool.FireRadius>6&&fedPool.FireRadius<12&&fedPool.FireSeconds>30&&fedPool.SmokeSeconds>=fedPool.FireSeconds+20&&fedPool.FlameHeight>6,
+                        "A spill landing in a burning pool feeds it: wider, a little taller, burning longer");
+                    Check(sand.DustB>0.6&&Math.Abs(grass.DustR-0.6)<1e-9&&Math.Abs(grass.DustG-0.5)<1e-9,"Blast dust takes the ground's colour (snow, sand, rock) but not the grass's green");
+                    Check(mixA.BurnableKg>=700&&mixA.BurnableKg<=1250&&Math.Abs(mixA.BurnableKg-mixB.BurnableKg)>1&&mixC.BurnableKg==1000&&mixC.SmokeR==0.3,
+                        "Each 1.1 explosion burns a slightly different share of its load and smoke shade; Classic is unchanged");
+                    Check(VolumeEvolution.MarchDivisor(1,false)==1&&VolumeEvolution.MarchDivisor(1,true)==2&&VolumeEvolution.MarchDivisor(3,true)==4&&VolumeEvolution.MarchDivisor(9,false)==3,
+                        "The simulated fireball is marched one resolution step lower (with four times the steps)");
+                }
+                finally { VolumeEvolution.UseSim=false; }
+                lookTank.Look=LookProfile.Classic();
+            }
+            {
+                var chemMono=LookPlan(Plan(Part(1.225,new[]{R("MonoPropellant",750)},speed:50,mass:1200),EventKind.GroundImpact),LookProfile.Default(LookKind.Tank));
+                double chemMonoKg=chemMono.BurnableKg; Chemistry.Apply(chemMono);
+                var chemHyper=LookPlan(Plan(Part(1.225,new[]{R("UDMH",2500),R("NTO",4500)},speed:60,mass:9000),EventKind.GroundImpact),LookProfile.Default(LookKind.Tank));
+                Chemistry.Apply(chemHyper);
+                var chemH2=LookPlan(Plan(Part(1.225,new[]{R("LqdHydrogen",700),R("LqdOxygen",4200)},speed:60,mass:9000),EventKind.GroundImpact),LookProfile.Default(LookKind.Tank));
+                Chemistry.Apply(chemH2);
+                var chemOld=Plan(Part(1.225,new[]{R("UDMH",2500),R("NTO",4500)},speed:60,mass:9000),EventKind.GroundImpact); chemOld.Look=LookProfile.Classic();
+                double chemOldR=chemOld.SmokeR, chemOldSoot=chemOld.Soot; Chemistry.Apply(chemOld);
+                Check(chemMono.Mono>0.9&&chemMono.Soot==0&&chemMono.BurnableKg<chemMonoKg&&chemMono.SmokeR>0.7&&chemHyper.SmokeR>chemHyper.SmokeG+0.2&&chemHyper.SmokeG>chemHyper.SmokeB&&
+                    chemH2.Hydrogen>0.1&&chemH2.WhiteFlame>0&&chemOld.SmokeR==chemOldR&&chemOld.Soot==chemOldSoot,
+                    "1.1 explosions show what burned (monopropellant, hypergolic, hydrogen); Classic plans are left alone");
+                var chemOre=Plan(Part(1.225,new[]{R("Ore",6000)},speed:90,mass:8000),EventKind.GroundImpact);
+                chemOre.Look=LookProfile.Classic(); var chemClassic=VolumeEvolution.Evaluate(chemOre,0.5,true,true,true,false);
+                chemOre.Look=LookProfile.Default(LookKind.Tank); var chemOreState=VolumeEvolution.Evaluate(chemOre,0.5,true,true,true,false);
+                Check(chemOre.OreKg==6000&&Chemistry.OreDust(chemOre)>0.9&&chemOreState.Dust>=chemClassic.Dust&&chemOreState.Dust>0.5&&chemOreState.DustR!=chemClassic.DustR&&new ResourceClassifier().Classify(Part(1.225,new[]{R("Ore",10)}))==PartKind.Structure,
+                    "An ore tank bursts into rock dust in 1.1, without changing what the part is");
+            }
+            Check(Conflicts.Find(new[]{"Assembly-CSharp","VolumetricExplosions"},null)=="Volumetric Explosions"&&Conflicts.Find(null,new[]{"volumetricexplosions"})!=null&&
+                Conflicts.Find(new[]{"VolumetricExplosionFX","Assembly-CSharp"},new[]{"VolumetricExplosionFX","Squad"})==null,"Another mod that replaces explosions is recognised, our own folder is not");
+            {
+                lookTank.Look=LookProfile.Classic();
+                var shadowOld=VolumeEvolution.Shadow(VolumeEvolution.Evaluate(lookTank,2.5,true,true,true,false,lookLayout),13);
+                lookTank.Look=LookProfile.Default(LookKind.Tank);
+                var shadowHotState=VolumeEvolution.Evaluate(lookTank,0.2,true,true,true,false,lookLayout);
+                var smokeState=VolumeEvolution.Evaluate(lookTank,2.5,true,true,true,false,lookLayout);
+                var shadowHot=VolumeEvolution.Shadow(shadowHotState,13); var shadowSmoke=VolumeEvolution.Shadow(smokeState,13);
+                Check(shadowOld.Y==0&&shadowSmoke.Y>shadowHot.Y&&shadowSmoke.Y<=0.6&&shadowSmoke.Z>0&&VolumeEvolution.ShadowLobe(smokeState,0).W>0,
+                    "1.1 smoke casts a ground shadow, darker once the glowing fire has cooled; Classic casts none");
+                lookTank.Look=LookProfile.Classic();
+            }
+            {
+                lookTank.Look=LookProfile.Classic(); var fireOld=Residue.Plan(lookTank,true,false,180);
+                lookTank.Look=LookProfile.Default(LookKind.Tank); var fireNew=Residue.Plan(lookTank,true,false,180);
+                Check(fireNew.FireSeconds>=fireOld.FireSeconds&&Residue.Plan(lookTank,true,false,10).FireSeconds<=10+fireNew.Delay+1e-9,
+                    "1.1 spilled fuel burns at least as long, within the player's residue limit");
+                lookTank.Look=LookProfile.Classic();
+            }
+            var dial=LookProfile.Classic(); dial[LookProfile.IndexOf("coolingRate")]=2; lookTank.Look=dial;
+            Check(VolumeEvolution.Evaluate(lookTank,1.2,true,true,true,false,lookLayout).FireHeat<classic.FireHeat,"A faster cooling rate puts the flames out sooner");
+            dial=LookProfile.Classic(); dial[LookProfile.IndexOf("expansionSpeed")]=2; lookTank.Look=dial;
+            Check(VolumeEvolution.Evaluate(lookTank,0.2,true,true,true,false,lookLayout).Lobe0.Radius>
+                VolumeEvolution.Evaluate(LookPlan(lookTank,LookProfile.Classic()),0.2,true,true,true,false,lookLayout).Lobe0.Radius,
+                "A faster expansion grows the fireball sooner");
+            dial=LookProfile.Classic(); dial[LookProfile.IndexOf("effectLifetime")]=2; dial[LookProfile.IndexOf("lightIntensity")]=0; lookTank.Look=dial;
+            Check(VolumeEvolution.VolumeDuration(lookTank)>noLookDuration&&VolumeEvolution.VolumeDuration(lookTank)<=20&&
+                VolumeEvolution.LightIntensity(VolumeEvolution.Evaluate(lookTank,0.3,true,true,true,false,lookLayout))==0,
+                "Lifetime and light dials act within their bounds");
+            dial[0]=99; dial[LookProfile.IndexOf("flameHeat")]=-5;
+            Check(dial.Shape==LookProfile.Max[0]&&dial.FlameHeat==LookProfile.Min[11],"Look dials are clamped to their accepted range");
+            bool defaultsValid=true;
+            foreach(LookKind k in Enum.GetValues(typeof(LookKind)))
+            { var d=LookProfile.Default(k); var copy=d.Clone(); copy.Validate(); defaultsValid&=copy.SameAs(d); }
+            Check(defaultsValid&&LookProfile.Keys.Length==LookProfile.Count&&LookProfile.Min.Length==LookProfile.Count&&LookProfile.Max.Length==LookProfile.Count,
+                "Every shipped look profile lies inside the dial ranges");
+            var solidPlan=Plan(Part(1.225,new[]{R("SolidFuel",7000)},speed:12,mass:8500),EventKind.GroundImpact);
+            Check(LookProfile.Select(solidPlan,true,false,1)==LookKind.Solid&&LookProfile.Select(lookTank,true,false,1)==LookKind.Tank&&
+                LookProfile.Select(lookTank,true,false,6)==LookKind.Vessel&&LookProfile.Select(lookTank,true,true,1)==LookKind.Reentry,
+                "Explosions pick the look of what exploded and where");
+            var thin=Plan(Part(0.1,new[]{R("LiquidFuel",900),R("Oxidizer",1100)}));
+            var thick=Plan(Part(1.225,new[]{R("LiquidFuel",900),R("Oxidizer",1100)}));
+            Check(LookProfile.Select(thin,false,false,1)==LookKind.HighAltitude&&LookProfile.Select(thick,false,false,1)==LookKind.Atmospheric,
+                "Airbursts pick the atmospheric or high-altitude look by air density");
+            var library=new LookLibrary(); library[LookKind.Tank][0]=1.7; library.UseClassic=true;
+            Check(library.For(LookKind.Tank).SameAs(LookProfile.Classic())&&library[LookKind.Tank].Shape==1.7,"The Classic switch overrides the edited profiles without losing them");
+            library.Reset(LookKind.Tank);
+            LookKind parsed;
+            Check(library[LookKind.Tank].SameAs(LookProfile.Default(LookKind.Tank))&&LookLibrary.TryParse("highaltitude",out parsed)&&parsed==LookKind.HighAltitude,
+                "A profile resets to its shipped default and kinds parse by name");
+            var live=new LookLibrary(); LookProfile held=live[LookKind.Vessel]; held[2]=0.1;
+            Check(!live.IsDefault(LookKind.Vessel)&&live.IsDefault(LookKind.Tank),"Only edited profiles count as changed");
+            live.Reset(LookKind.Vessel);
+            Check(ReferenceEquals(held,live[LookKind.Vessel])&&held.SameAs(LookProfile.Default(LookKind.Vessel)),
+                "Resetting a profile updates it in place, so explosions on screen follow");
+            live.Forced=(int)LookKind.Solid;
+            Check(live.Choose(LookKind.Tank)==LookKind.Solid&&new LookLibrary().Choose(LookKind.Tank)==LookKind.Tank,
+                "A look-editor test forces the profile being tuned, otherwise the natural one is used");
+            live.UseClassic=true; live.Reset();
+            Check(!live.UseClassic&&live.IsDefault(LookKind.Solid),"Resetting every look also leaves the 1.0 comparison");
+            var gov=new FrameGovernor(22);
+            for(int i=0;i<300;i++) gov.Update(14,1/60.0,false);
+            for(int i=0;i<240;i++) gov.Update(40,1/25.0,true);
+            Check(gov.Scale<0.6&&gov.Scale>=FrameGovernor.MinScale&&gov.Lights(6)<6&&gov.Lights(6)>=1,"Slow frames with effects lower volume detail and lights, within bounds");
+            Check(gov.Volumes(8)<8&&gov.Volumes(8)>=6&&new FrameGovernor().Volumes(8)==8,"Under load a few fewer new volumes are admitted, never under three quarters (detail goes first)");
+            var lax=new FrameGovernor(22); for(int i=0;i<600;i++) lax.Update(45,1/22.0,false);
+            Check(lax.BudgetMs<=33,"A slow moment without effects cannot make the frame budget lax");
+            Check(!new FxSettings().Adaptive,"Adaptive performance is off unless the player turns it on");
+            var res=new FxSettings { VolumeDivisor=2 };
+            res.ApplyPreset(Quality.Low); bool keptLow=res.VolumeDivisor==2; res.ApplyPreset(Quality.Ultra);
+            Check(keptLow&&res.VolumeDivisor==2&&res.Quality==Quality.Ultra,"Quality presets leave the volume resolution alone");
+            res.VolumeDivisor=9; res.Validate();
+            Check(res.VolumeDivisor==3&&new FxSettings().VolumeDivisor==1,"Volume resolution stays between full and a third, full by default");
+            double low=gov.Scale;
+            for(int i=0;i<600;i++) gov.Update(12,1/60.0,true);
+            Check(gov.Scale>low+0.3,"Detail recovers once frames are fast again");
+            var heavyGame=new FrameGovernor(22);
+            for(int i=0;i<600;i++) heavyGame.Update(30,1/33.0,false);
+            for(int i=0;i<300;i++) heavyGame.Update(34,1/30.0,true);
+            Check(heavyGame.BudgetMs==33,"A scene already slow without effects gets a larger, bounded budget");
+            gov.Update(5000,1,true); gov.Update(double.NaN,1,true);
+            Check(gov.Scale>=FrameGovernor.MinScale&&gov.Scale<=1,"Loading hitches and invalid frame times are ignored");
+            var hotState=new VolumeState { FireHeat=1, Glow=0, Atmosphere=1 };
+            var coolState=new VolumeState { FireHeat=0.15, Glow=0, Atmosphere=1 };
+            var flashState=new VolumeState { FireHeat=1, Glow=1, Atmosphere=1 };
+            Vec3 hotC=ExplosionLight.Colour(hotState), coolC=ExplosionLight.Colour(coolState), flashC=ExplosionLight.Colour(flashState);
+            Check(hotC.Y>coolC.Y&&hotC.Z>coolC.Z&&flashC.Z>hotC.Z&&coolC.X==1&&coolC.Y<0.5,
+                "Explosion light runs from a white flash through yellow to deep orange as the fireball cools");
+            Check(ExplosionLight.Range(flashState,10,30)>ExplosionLight.Range(hotState,10,30)&&ExplosionLight.Range(hotState,40,30)>ExplosionLight.Range(hotState,5,30)&&
+                ExplosionLight.Range(flashState,500,500)<=400,"The flash reaches further, bigger fireballs light further, within bounds");
+            Check(ExplosionLight.Priority(2,60,50)>ExplosionLight.Priority(2,60,800)&&ExplosionLight.Priority(2,120,300)>ExplosionLight.Priority(0.5,120,300)&&
+                ExplosionLight.Priority(0.01,60,10)==0,"Light priority favours bright, large, close explosions and ignores faint ones");
+            var pr=new double[]{0.5,3,0,2,1}; var ch=new bool[5]; var ord=new int[5];
+            int taken=ExplosionLight.Select(pr,5,2,ch,ord);
+            Check(taken==2&&ord[0]==1&&ord[1]==3&&ch[1]&&ch[3]&&!ch[0]&&!ch[2]&&!ch[4],"The light budget keeps the strongest lights, best first");
+            Check(ExplosionLight.Select(pr,5,0,ch,ord)==0&&!ch[1]&&ExplosionLight.Select(new double[]{0,0},2,3,ch,ord)==0,
+                "No light is chosen with a zero budget or without candidates");
+            {
+                var flat=new FragmentMotion{ LandTime=1, LandHeight=0, RestHeight=0, Slide=new Vec3(4,0,0), SlideTime=2, Velocity=new Vec3(10,0,0) };
+                var hill=flat; hill.SlopeX=0.3;
+                Vec3 endFlat=DebrisPlanner.Where(flat,9.81,10), endHill=DebrisPlanner.Where(hill,9.81,10);
+                Check(Math.Abs(endFlat.Y)<1e-9&&Math.Abs(endHill.Y-0.3*(endHill.X-DebrisPlanner.Where(hill,9.81,1).X))<1e-6&&endHill.Y>0.5,
+                    "A wreck piece skidding on a hillside follows the slope instead of the flat plane of the blast");
+            }
+            Check(ExplosionLight.LampScore(3,60,40,20,true,0.1,0.4)>0&&ExplosionLight.LampScore(3,60,40,20,true,1.5,0.4)==0&&
+                ExplosionLight.LampScore(3,60,200,20,false,0,0)==0&&ExplosionLight.LampScore(3,60,30,20,false,2,0)>ExplosionLight.LampScore(3,60,70,20,false,2,0)&&
+                ExplosionLight.LampScore(0.01,60,10,20,false,0,0)==0,"Lamps light smoke only in reach and inside their cone, more when closer");
+            Check(ExplosionLight.Flicker(0.05,1.3)==1&&Math.Abs(ExplosionLight.Flicker(2,1.3)-1)<=0.15,"Light flicker starts smoothly and stays within 15 %");
             Console.WriteLine("Verified assertions: "+count);
         }
         catch(Exception ex) { Console.Error.WriteLine("FAIL "+ex.Message); Environment.Exit(1); }

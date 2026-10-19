@@ -19,6 +19,7 @@ namespace VolumetricExplosionFX.Rendering
         internal float Sunlit;          // 0 in the shadow of a body, 1 in full starlight
         internal double GasRate;        // in flight: rate (1/s) at which the gas gives the vehicle's velocity up to the air (0: never)
         internal bool FloorWet;         // that floor is the sea
+        internal bool SplashVolume;     // 1.1: the splash is drawn as a volume (no white sprite column, dome, mist ring)
         internal int DebrisBudget; internal uint Seed;
     }
     internal sealed class BlastParticles
@@ -142,17 +143,17 @@ namespace VolumetricExplosionFX.Rendering
                 }
             }
         }
-        static void Render(ParticleSystem p,ParticleSystemRenderMode mode,float velocityScale)
+        internal static void Render(ParticleSystem p,ParticleSystemRenderMode mode,float velocityScale)
         {
             ParticleSystemRenderer r=p.GetComponent<ParticleSystemRenderer>();
             r.renderMode=mode; r.lengthScale=1; r.velocityScale=velocityScale;
         }
-        static void Brake(ParticleSystem p,float drag)
+        internal static void Brake(ParticleSystem p,float drag)
         {
             ParticleSystem.LimitVelocityOverLifetimeModule b=p.limitVelocityOverLifetime; b.enabled=true;
             b.limit=1e5f; b.dampen=0; b.drag=drag; b.multiplyDragByParticleSize=false; b.multiplyDragByParticleVelocity=false;
         }
-        static ParticleSystem System(Transform parent,string name,Material material,int capacity)
+        internal static ParticleSystem System(Transform parent,string name,Material material,int capacity)
         {
             GameObject go=new GameObject(name); go.layer=EffectLayer.Value; go.transform.SetParent(parent,false);
             ParticleSystem p=go.AddComponent<ParticleSystem>(); p.Stop(true,ParticleSystemStopBehavior.StopEmittingAndClear);
@@ -195,14 +196,15 @@ namespace VolumetricExplosionFX.Rendering
             fire.randomSeed=s+1; smoke.randomSeed=s+2; fragments.randomSeed=s+3; spray.randomSeed=s+4;
             embers.randomSeed=s+5; chunks.randomSeed=s+6; ring.randomSeed=s+7;
             foreach(ParticleSystem p in Roots()) if(p!=shower?.System&&p!=heavy?.System&&p!=runaway?.System&&p!=plasma?.System&&p!=plasmaSmoke?.System&&p!=dirt?.System) p.Play();
-            Vec3 breeze=Aftermath.Wind(c.Seed,c.Air); wind=new Vector3((float)breeze.X,0,(float)breeze.Z);
+            Vec3 breeze=Aftermath.Wind(c.Seed,c.Air,c.Plan.Look!=null&&c.Plan.Look.Modern); wind=new Vector3((float)breeze.X,0,(float)breeze.Z);
             dust=new Color((float)c.Plan.DustR,(float)c.Plan.DustG,(float)c.Plan.DustB,1);
             FxPlan plan=c.Plan; FxSettings settings=c.Settings;
             float radius=(float)plan.Radius, speed=(float)plan.ExpansionSpeed;
             bool burning=settings.Explosions&&plan.FireFraction>0.05;
             nextPuff=0.12f; nextFlame=0.35f; remainingPuffs=plan.PuffCount;
             double handover=Aftermath.Start(plan,c.Layout!=null?c.Layout.Tempo:1);
-            cloudStart=c.Dome&&settings.Explosions&&cloud!=null&&!double.IsInfinity(handover)?(float)handover:float.PositiveInfinity;
+            bool simCloud=VolumeEvolution.UseSim&&plan.Look!=null&&plan.Look.Modern;   // the volume's own smoke lingers: no sprite puffs on top
+            cloudStart=c.Dome&&settings.Explosions&&cloud!=null&&!double.IsInfinity(handover)&&!simCloud?(float)handover:float.PositiveInfinity;
             afterStart=!c.Dome&&cloud!=null&&c.Air>0.05f&&settings.Explosions?1.1f+0.6f*random.Next():float.PositiveInfinity;
             afterLeft=(int)Mathf.Clamp(3+(float)plan.VisualEnergyScore,3,9);
             Horizon=6;
@@ -226,6 +228,26 @@ namespace VolumetricExplosionFX.Rendering
             if(settings.Burst&&plan.ElectricFraction>0.01)
                 for(int i=0;i<6;i++) Emit(fire,Vector3.zero,random.Direction()*5,0.035f,0.12f+random.Next()*0.15f,
                     new Color(0.65f,0.8f,1,(float)plan.ElectricFraction));
+            if(settings.Burst&&plan.ElectricFraction>0.01&&plan.Look!=null&&plan.Look.Modern)
+            {
+                // 1.1: a battery shorts out in a blue-white arc flash and a spray of fast sparks.
+                float e=(float)plan.ElectricFraction;
+                float arc=Mathf.Max(radius,1.5f);
+                Emit(fire,Lift(Vector3.zero,arc),Vector3.zero,arc*(4f+2f*e),0.25f,new Color(0.8f,0.9f,1,e));
+                Emit(fire,Lift(Vector3.zero,arc*2),Vector3.zero,arc*(9f+3f*e),0.4f,new Color(0.5f,0.68f,1,0.55f*e));
+                for(int i=0;i<14;i++) Emit(fire,Lift(Vector3.zero,0.1f),random.Direction()*(6+10*random.Next()),0.08f+0.08f*random.Next(),0.15f+0.3f*random.Next(),
+                    new Color(0.8f,0.9f,1,e));
+                // The short keeps arcing: a few more crackling flashes over about a second (Tick), and acrid pale smoke.
+                arcCount=2+(int)(random.Next()*4); arcNext=0; arcSize=arc; arcPower=e;
+                for(int i=0;i<arcCount;i++) arcTimes[i]=0.08f+1.1f*random.Next();
+                global::System.Array.Sort(arcTimes,0,arcCount);
+                for(int i=0;i<3+(int)(3*e);i++)
+                {
+                    Vector3 d=Upward(random.Direction()); float puff=arc*(0.8f+0.6f*random.Next());
+                    Emit(smoke,Lift(d*arc*0.3f,puff),d*1.5f+Vector3.up*(1+random.Next()),puff,2.5f+2*random.Next(),new Color(0.74f,0.75f,0.77f,0.3f*e));
+                }
+            }
+            else arcCount=0;
             if(!reentry) EmitEmbers(burning,radius,speed);
             EmitDebris(radius,speed);
             if(!reentry) { if(shower!=null) EmitShower(); else EmitChunks(burning); }
@@ -287,6 +309,28 @@ namespace VolumetricExplosionFX.Rendering
             }
             Horizon=Mathf.Max(Horizon,11);
         }
+        // 1.1 underwater blast: the gas bubble lifts a white dome of water that bursts into spray, and a ring of mist (base
+        // surge) rolls out over the surface. Started under the surface, the spray shows only once it breaks through.
+        void EmitWaterDome()
+        {
+            float R=(float)Splash.DomeRadius(c.Plan), depth=(float)c.Plan.Depth, rise=(float)Splash.DomeDelay(c.Plan);
+            for(int i=0;i<44;i++)
+            {
+                Vector3 d=random.Direction(); d.y=0.25f+0.75f*Mathf.Abs(d.y); d.Normalize();
+                float size=R*(0.18f+0.12f*random.Next());
+                Vector3 start=d*R*0.15f-Vector3.up*Mathf.Min(depth*0.3f,R*0.8f)*(0.5f+0.5f*random.Next());
+                SmokeParticles.Emit(splash,start,d*R*(1.3f+0.8f*random.Next())/(0.6f+rise),size,1.6f+1.2f*random.Next(),
+                    new Color(0.95f,0.97f,1,0.55f),random.Next()*360);
+            }
+            for(int i=0;i<18;i++)
+            {
+                float a=i*0.349f+random.Next()*0.3f; var radial=new Vector3(Mathf.Cos(a),0,Mathf.Sin(a));
+                float size=R*(0.35f+0.2f*random.Next());
+                SmokeParticles.Emit(splash,radial*R*0.4f+Vector3.up*size*0.3f,radial*R*(1.2f+0.6f*random.Next())+Vector3.up*(0.5f+random.Next()),size,
+                    3+2*random.Next(),new Color(0.9f,0.93f,0.97f,0.32f),random.Next()*360);
+            }
+            Horizon=Mathf.Max(Horizon,8);
+        }
         void EmitReentry()
         {
             FxPlan plan=c.Plan;
@@ -327,6 +371,52 @@ namespace VolumetricExplosionFX.Rendering
                 (uint)(random.Next()*16777216f)^0xD127u,0f,null,0);
             Horizon=Mathf.Max(Horizon,(float)(dp.LifeMax*dp.TrailLife/0.8)+2);
         }
+        // 1.1: a fast ground impact tears up the soil: clods of earth thrown forward and up, falling back within seconds.
+        void EmitClods()
+        {
+            if(c.Plan.Look==null||!c.Plan.Look.Modern||fragments==null) return;
+            Vector3 flat=c.Velocity; flat.y=0;
+            float speed=flat.magnitude, hit=Mathf.Max(-c.Velocity.y,0);
+            // A buried or surface warhead throws the earth up in a cone, whatever the bomb's own speed.
+            WarheadKind w=c.Plan.Warhead;
+            float blast=w==WarheadKind.Bomb?90:w==WarheadKind.Nuke?120:w==WarheadKind.HighExplosive?45:w==WarheadKind.Structure?28:0;   // a building throws chunks of wall
+            if(blast>0) { hit=Mathf.Max(hit,blast); speed=Mathf.Min(speed,10); }
+            if(speed+hit<25) return;
+            int count=(int)Mathf.Clamp((speed+hit)/4*(blast>0?2.2f:1),8,blast>0?220:60);
+            Vector3 fwd=speed>1?flat/speed:Vector3.forward;
+            Color soil=Dust(0.55f,1);
+            for(int i=0;i<count;i++)
+            {
+                Vector3 side=random.Direction(); side.y=0;
+                float up=blast>0?blast*(0.15f+0.3f*random.Next()):3+9*random.Next(), g=Mathf.Max(c.Gravity,1);
+                var ep=new ParticleSystem.EmitParams();
+                ep.position=Lift(side*c.DomeRadius*0.15f,0.3f);
+                ep.velocity=fwd*speed*(0.25f+0.4f*random.Next())+side*(2+6*random.Next())*(blast>0?blast*0.12f:1)+Vector3.up*up;
+                float size=(0.15f+0.45f*random.Next()*random.Next())*(blast>0?1+blast/60:1);
+                ep.startSize3D=new Vector3(size*(0.7f+0.6f*random.Next()),size*(0.6f+0.5f*random.Next()),size*(0.7f+0.6f*random.Next()));
+                ep.startLifetime=2*up/g+0.1f;
+                float shade=0.7f+0.5f*random.Next();
+                ep.startColor=new Color(Mathf.Min(1,soil.r*shade),Mathf.Min(1,soil.g*shade),Mathf.Min(1,soil.b*shade),0);   // alpha 0: no glow
+                fragments.Emit(ep,1);
+            }
+            ParticleSystem.ForceOverLifetimeModule force=fragments.forceOverLifetime;
+            force.enabled=true; force.space=ParticleSystemSimulationSpace.Local; force.y=-c.Gravity;
+        }
+        // 1.1: embers carried up from a burning pool or strip (blast frame: centre, strip direction and length).
+        float emberDebt;
+        internal void FireEmbers(float dt,float level,float radius,Vector3 stripDir,float stripLength)
+        {
+            if(!active||embers==null||level<=0.05f||c.Plan.Look==null||!c.Plan.Look.Modern||c.Air<0.1f) return;
+            emberDebt+=dt*level*(3+stripLength/6);
+            while(emberDebt>=1)
+            {
+                emberDebt-=1;
+                Vector2 spot=new Vector2(random.Next()*2-1,random.Next()*2-1)*radius*0.7f;
+                Vector3 at=new Vector3(spot.x,0.5f,spot.y)+stripDir*(stripLength*random.Next());
+                Emit(embers,at,new Vector3(random.Next()-0.5f,0,random.Next()-0.5f)*2+wind*0.4f+Vector3.up*(4+6*random.Next()),
+                    0.05f+0.07f*random.Next(),1.5f+2*random.Next(),new Color(1,0.45f+0.3f*random.Next(),0.12f,0.9f));
+            }
+        }
         void EmitBurst()
         {
             bool water=c.Water;
@@ -341,8 +431,17 @@ namespace VolumetricExplosionFX.Rendering
             brake.limit=1e5f; brake.dampen=0; brake.drag=drag;
             brake.multiplyDragByParticleSize=false; brake.multiplyDragByParticleVelocity=false;
             var tint=water?new Color(0.9f,0.93f,0.97f,1):Dust(1.2f,1);
+            // 1.1: an ore tank bursts into a thick cloud of rock dust.
+            float ore=!water&&c.Plan.Look!=null&&c.Plan.Look.Modern?(float)Chemistry.OreDust(c.Plan):0;
+            if(ore>0)
+            {
+                strength=Mathf.Max(strength,1.3f*ore); reach*=1+1.5f*ore;
+                Vec3 rock=Chemistry.OreColour(new Vec3(dust.r,dust.g,dust.b)); tint=new Color((float)rock.X*1.15f,(float)rock.Y*1.15f,(float)rock.Z*1.15f,1);
+            }
             float opacity=Mathf.Min(1,strength+0.35f), linger=water?1:0.8f+0.8f*Mathf.Min(1,strength);
-            int ringCount=(int)Mathf.Clamp(14+8*strength,14,22);
+            // 1.1 with the simulated fireball: the ground dust is part of the volume (skirt), not round sprites; ore keeps its cloud.
+            bool volumeDust=!water&&(ore<=0||c.Plan.Warhead!=WarheadKind.None)&&c.Plan.Look!=null&&c.Plan.Look.Modern&&VolumeEvolution.UseSim;
+            int ringCount=volumeDust||water&&c.SplashVolume?0:(int)Mathf.Clamp(14+8*strength,14,22);
             for(int i=0;i<ringCount;i++)
             {
                 float a=(i+random.Next()*0.8f)/ringCount*Mathf.PI*2;
@@ -352,8 +451,9 @@ namespace VolumetricExplosionFX.Rendering
                 SmokeParticles.Emit(burst,Lift(radial*reach*(0.1f+0.2f*random.Next()),size),velocity,size,((water?5:6)+4*random.Next())*linger,
                     new Color(tint.r,tint.g,tint.b,(water?0.16f:0.2f)*opacity),random.Next()*360);
             }
-            if(water&&splash!=null) EmitSplashColumn(reach,strength);
-            int plumeCount=water&&splash!=null?0:(int)Mathf.Clamp(3+3*strength,3,6);
+            if(water&&splash!=null&&!c.SplashVolume) EmitSplashColumn(reach,strength);
+            if(water&&splash!=null&&!c.SplashVolume&&Splash.DomeRadius(c.Plan)>0) EmitWaterDome();
+            int plumeCount=water&&splash!=null||volumeDust?0:(int)Mathf.Clamp(3+3*strength,3,6);
             for(int i=0;i<plumeCount;i++)
             {
                 Vector3 d=random.Direction(); d.y=Mathf.Abs(d.y)*2.5f+1; d.Normalize();
@@ -384,9 +484,11 @@ namespace VolumetricExplosionFX.Rendering
         void EmitEmbers(bool burning,float radius,float speed)
         {
             FxPlan plan=c.Plan; float air=c.Air;
+            // 1.1: short orange sparks scattered all round, not long white needles bunched into a star.
+            bool modern=plan.Look!=null&&plan.Look.Modern;
             ParticleSystem.LimitVelocityOverLifetimeModule drag=embers.limitVelocityOverLifetime;
             drag.enabled=air>0.05f; drag.limit=8; drag.dampen=0.08f;
-            Render(embers,air>0.05f?ParticleSystemRenderMode.Stretch:ParticleSystemRenderMode.Billboard,0.05f);
+            Render(embers,air>0.05f?ParticleSystemRenderMode.Stretch:ParticleSystemRenderMode.Billboard,modern?0.009f:0.05f);
             ParticleSystem.ForceOverLifetimeModule sink=embers.forceOverLifetime;
             sink.enabled=true; sink.space=ParticleSystemSimulationSpace.Local; sink.x=0; sink.z=0;
             sink.y=c.Surface||air>0.02f?-c.Gravity*(air>0.05f?0.7f:1):0;
@@ -399,18 +501,20 @@ namespace VolumetricExplosionFX.Rendering
                 bounce.bounce=0.35f; bounce.dampen=0.45f; bounce.lifetimeLoss=0.25f; bounce.radiusScale=0.5f;
             }
             int count=(int)Numbers.Clamp(burning||c.Dome?20+plan.VisualEnergyScore*14:4+plan.VisualEnergyScore*3,4,Math.Min(140,c.Settings.ParticlesPerEvent));
-            float size=Mathf.Clamp(radius*0.025f,0.05f,0.3f);
+            if(modern) count=Math.Max(4,(int)(count*0.6f));
+            float size=Mathf.Clamp(radius*0.025f,0.05f,0.3f)*(modern?0.75f:1);
             int sheaves=3+(int)(random.Next()*4);
             var sheaf=new Vector3[6];
             for(int k=0;k<sheaves;k++) { sheaf[k]=random.Direction(); if(c.Surface) sheaf[k].y=Mathf.Abs(sheaf[k].y)*0.8f+0.3f; }
             for(int i=0;i<count;i++)
             {
                 Vector3 d=random.Direction();
-                if(random.Next()<0.6f) d=(sheaf[Mathf.Min((int)(random.Next()*sheaves),sheaves-1)].normalized+random.Direction()*0.3f).normalized;
+                if(random.Next()<(modern?0.3f:0.6f)) d=(sheaf[Mathf.Min((int)(random.Next()*sheaves),sheaves-1)].normalized+random.Direction()*(modern?0.5f:0.3f)).normalized;
                 if(c.Surface&&d.y<0) d.y=-d.y*0.3f;
                 float life=air>0.05f?1+random.Next()*2:0.8f+random.Next()*0.8f;
-                Emit(embers,d*radius*0.15f,d*speed*(0.4f+random.Next())+Vector3.up*speed*0.25f*air,size*(0.6f+random.Next()),
-                    life,new Color(1,0.55f+random.Next()*0.3f,0.22f,1));
+                float throwSpeed=modern?Mathf.Min(speed,90)*(0.35f+0.75f*random.Next()):speed*(0.4f+random.Next());
+                Emit(embers,d*radius*0.15f,d*throwSpeed+Vector3.up*speed*0.25f*air,size*(0.6f+random.Next()),
+                    life,modern?new Color(1,0.42f+random.Next()*0.25f,0.12f,0.85f):new Color(1,0.55f+random.Next()*0.3f,0.22f,1));
             }
         }
         void EmitDebris(float radius,float speed)
@@ -462,7 +566,8 @@ namespace VolumetricExplosionFX.Rendering
             ShowerPlan hp=Shower.Heavy(plan,c.Surface,g,settings.ParticlesPerEvent);
             if(hp.Kind!=ShowerKind.None)
             {
-                if(ember!=null) TrailShower.ConfigureEmbers(ember,emberFlames,emberSmoke,tint,8,16,sheets);
+                bool calm=plan.Look!=null&&plan.Look.Modern;   // 1.1: chunks burn out sooner, so the field is not dotted with flames
+                if(ember!=null) TrailShower.ConfigureEmbers(ember,emberFlames,emberSmoke,tint,calm?3:8,calm?6:16,sheets);
                 heavy.Burst(hp,smokeColor,head,Vector3.up*lift,spread,inherited,(uint)(random.Next()*16777216f)^0x4EA7u,floor,land?ember:null,0);
                 Horizon=Mathf.Max(Horizon,(float)(hp.LifeMax*Math.Max(1,hp.TrailLife)/0.8)+2);
                 if(land) Horizon=Mathf.Max(Horizon,(float)hp.LifeMax+16+9+1);
@@ -527,7 +632,12 @@ namespace VolumetricExplosionFX.Rendering
             int clumps=airless?Math.Min(c.Settings.ParticlesPerEvent,plan.PuffCount*3):water?Math.Min(c.Settings.ParticlesPerEvent,plan.PuffCount*2):
                 c.Dome?Math.Max(3,plan.PuffCount/4):plan.PuffCount;
             if(burst!=null&&!airless) clumps=Math.Max(3,clumps/3);
+            if(water&&c.SplashVolume) clumps=0;
             float fireball=(float)c.Layout.RadiusMeters;
+            bool modernVacuum=airless&&plan.Look!=null&&plan.Look.Modern;
+            float[] rays=new float[modernVacuum?7+(int)(random.Next()*6):1];
+            for(int k=0;k<rays.Length;k++) rays[k]=random.Next()*6.2831853f;
+            if(modernVacuum) { clumps=Math.Min(c.Settings.ParticlesPerEvent,Math.Max(220,plan.PuffCount*6)); Horizon=Mathf.Max(Horizon,Mathf.Min(30,2*(Mathf.Min(speed,400)*0.34f+3+rise*0.2f)/Mathf.Max(c.Gravity,0.3f))); }
             for(int i=0;i<clumps;i++)
             {
                 Vector3 radial=random.Direction(); radial.y=0; radial.Normalize();
@@ -555,9 +665,24 @@ namespace VolumetricExplosionFX.Rendering
                 }
                 else if(airless)
                 {
-                    float elevation=0.5f+random.Next()*0.6f, v=speed*(0.6f+random.Next()*0.9f)+rise*0.4f;
-                    direction=radial*v*Mathf.Cos(elevation)+Vector3.up*v*Mathf.Sin(elevation)+tangent;
-                    size=Mathf.Clamp(radius*(0.02f+random.Next()*0.03f),0.15f,0.6f); life=1.8f+random.Next()*2.2f;
+                    float elevation, v=speed*(0.6f+random.Next()*0.9f)+rise*0.4f;
+                    if(modernVacuum)
+                    {
+                        // 1.1: without air the ejecta fly in clean ballistic arcs, a curtain at about 45 degrees, bunched into
+                        // rays like a lunar crater's, and fall back over the whole flight (seconds to tens of seconds).
+                        if(random.Next()<0.65f) { float ray=rays[(int)(random.Next()*rays.Length)%rays.Length]+(random.Next()-0.5f)*0.12f; radial=new Vector3(Mathf.Cos(ray),0,Mathf.Sin(ray)); }
+                        elevation=0.62f+random.Next()*0.3f;
+                        float slow=random.Next(); v=Mathf.Min(speed,400)*(0.04f+0.3f*slow*slow)+3+rise*0.2f;   // most ejecta are slow, a few fast
+                        direction=radial*v*Mathf.Cos(elevation)+Vector3.up*v*Mathf.Sin(elevation)+tangent;
+                        size=Mathf.Clamp(radius*(0.3f+random.Next()*0.35f),1.2f,6f);
+                        life=Mathf.Min(2*v*Mathf.Sin(elevation)/Mathf.Max(c.Gravity,0.3f)+0.2f,30);
+                    }
+                    else
+                    {
+                        elevation=0.5f+random.Next()*0.6f;
+                        direction=radial*v*Mathf.Cos(elevation)+Vector3.up*v*Mathf.Sin(elevation)+tangent;
+                        size=Mathf.Clamp(radius*(0.02f+random.Next()*0.03f),0.15f,0.6f); life=1.8f+random.Next()*2.2f;
+                    }
                     color=Dust(1.1f+0.35f*random.Next(),0.95f);
                 }
                 else
@@ -570,9 +695,10 @@ namespace VolumetricExplosionFX.Rendering
                 Emit(spray,Lift(start,size),direction,size,life,color);
             }
             if(dirt!=null&&!water) EmitDirt();
+            if(!water&&!airless) EmitClods();
             ParticleSystem.ForceOverLifetimeModule fall=spray.forceOverLifetime;
             fall.enabled=true; fall.space=ParticleSystemSimulationSpace.Local; fall.y=-c.Gravity;
-            if(water)
+            if(water&&!c.SplashVolume)
                 for(int i=0;i<8;i++)
                 {
                     Vector3 d=random.Direction(); d.y=Mathf.Abs(d.y)*0.5f; float puff=radius*(0.4f+random.Next()*0.4f);
@@ -585,15 +711,20 @@ namespace VolumetricExplosionFX.Rendering
             double v0,tau,reach;
             VolumeEvolution.ShockFront(c.Plan,c.Layout,out v0,out tau,out reach);
             float strength=(float)Numbers.Clamp(c.Plan.VisualEnergyScore/6,0.2,1);
-            float life=Mathf.Clamp((float)tau*4,0.8f,2.2f);
+            // 1.1: the blast wave raises a thick skirt of dust that races out along the ground and hangs there.
+            bool modern=c.Plan.Look!=null&&c.Plan.Look.Modern;
+            float life=Mathf.Clamp((float)tau*4,0.8f,2.2f)*(modern?2.2f:1);
             ParticleSystem.LimitVelocityOverLifetimeModule brake=ring.limitVelocityOverLifetime;
             brake.enabled=true; brake.dampen=1;
             var keys=new Keyframe[6];
             for(int k=0;k<keys.Length;k++) { float u=k/(keys.Length-1f); keys[k]=new Keyframe(u,Mathf.Exp(-u*life/(float)tau)); }
             brake.limit=new ParticleSystem.MinMaxCurve((float)v0,new AnimationCurve(keys));
             int count=(int)(56+64*strength);
-            float puff=Mathf.Clamp((float)reach*0.042f,1.8f,12);
-            Color color=c.Water?new Color(0.88f,0.93f,0.97f,0.5f*strength):Dust(1.1f,0.55f*strength);
+            float puff=Mathf.Clamp((float)reach*0.042f,1.8f,12)*(modern?1.9f:1);
+            Color color=c.Water?new Color(0.88f,0.93f,0.97f,0.5f*strength):Dust(1.1f,(modern?0.8f:0.55f)*strength);
+            // 1.1 on land: no sprite ring (it read as stock particles); the volume's dust skirt and the traced refraction are the wave.
+            if(modern&&!c.Water) return;
+            if(c.SplashVolume) return;
             for(int i=0;i<count;i++)
             {
                 float a=(i+random.Next()*0.6f)/count*Mathf.PI*2;
@@ -602,10 +733,21 @@ namespace VolumetricExplosionFX.Rendering
                     puff*(0.7f+random.Next()*0.6f),life*(0.85f+random.Next()*0.3f),color);
             }
         }
+        readonly float[] arcTimes=new float[6];
+        int arcCount, arcNext; float arcSize, arcPower;
         internal void Tick(float age,float dt,float groundFire,bool volume,in VolumeState state)
         {
             if(!active) return;
             FxPlan plan=c.Plan; FxSettings settings=c.Settings;
+            while(arcNext<arcCount&&age>=arcTimes[arcNext])
+            {
+                // A later arc of a shorted battery: smaller, bluer, with a few sparks.
+                float fade=1-0.5f*arcNext/Mathf.Max(arcCount,1), size=arcSize*(1.5f+2.5f*random.Next())*fade;
+                Emit(fire,Lift(random.Direction()*arcSize*0.3f,size),Vector3.zero,size,0.07f+0.08f*random.Next(),new Color(0.62f,0.8f,1,arcPower*fade));
+                for(int i=0;i<5;i++) Emit(fire,Lift(Vector3.zero,0.1f),random.Direction()*(5+9*random.Next()),0.06f+0.06f*random.Next(),0.12f+0.25f*random.Next(),
+                    new Color(0.85f,0.92f,1,arcPower*fade));
+                arcNext++;
+            }
             if(groundFire>0&&age>=nextFlame)
             {
                 nextFlame=age+(groundFlames!=null?0.3f:0.07f);
@@ -678,7 +820,7 @@ namespace VolumetricExplosionFX.Rendering
         void EmitCloud(float age,in VolumeState state)
         {
             FxPlan plan=c.Plan;
-            Vec3 wind=Aftermath.Wind(c.Seed,c.Air);
+            Vec3 wind=Aftermath.Wind(c.Seed,c.Air,c.Plan.Look!=null&&c.Plan.Look.Modern);
             int n=Aftermath.Build(state,plan,c.Seed,wind,c.Surface,puffs);
             if(n==0) return;
             double soot=Numbers.Clamp(plan.Soot,0,1);

@@ -5,6 +5,10 @@ Shader "VolumetricExplosionFX/HeatDistortion"
         _Shock ("Shock radius, offset, width, billboard half-size", Vector) = (0.6,0.02,0.08,1)
         _Haze ("Haze offset, height, half-width, age", Vector) = (0.004,1,0.55,0.5)
         _Seed ("Local seed", Float) = 37
+        _ShockGain ("Rim brightness gain", Float) = 1
+        _RingDepth ("1.1 nuclear ring: how far behind it the scene is fully bent (m), 0 = half the proxy", Float) = 0
+        [HideInInspector] _SrcBlend ("Source blend (1.1 blends by its own coverage)", Float) = 1
+        [HideInInspector] _DstBlend ("Destination blend", Float) = 0
     }
     SubShader
     {
@@ -13,7 +17,7 @@ Shader "VolumetricExplosionFX/HeatDistortion"
         Pass
         {
             Cull Off ZWrite Off ZTest LEqual
-            Blend Off
+            Blend [_SrcBlend] [_DstBlend]
             ColorMask RGB
             CGPROGRAM
             #pragma vertex vert
@@ -24,7 +28,7 @@ Shader "VolumetricExplosionFX/HeatDistortion"
             UNITY_DECLARE_DEPTH_TEXTURE(_CameraDepthTexture);
             sampler2D _VefxGrab;
             float4 _Shock, _Haze;
-            float _Seed;
+            float _Seed, _ShockGain, _RingDepth;
             struct v2f
             {
                 float4 vertex:SV_POSITION; float4 grab:TEXCOORD0;
@@ -92,9 +96,12 @@ Shader "VolumetricExplosionFX/HeatDistortion"
                     offset+=(upDir*d.y+side*d.x)*(_Haze.x*mask);
                 }
                 float sceneEye=LinearEyeDepth(SAMPLE_DEPTH_TEXTURE_PROJ(_CameraDepthTexture,UNITY_PROJ_COORD(i.screen)));
-                offset*=saturate((sceneEye-i.scale.w)/(i.scale.z*0.5+0.5));
+                // A nuclear ring sets its own depth scale: half its kilometres-wide proxy left the land behind it
+                // unbent for kilometres.
+                float depthScale=_RingDepth>0?_RingDepth:i.scale.z*0.5+0.5;
+                offset*=saturate((sceneEye-i.scale.w)/depthScale);
                 float2 uv=i.grab.xy/i.grab.w+offset*i.scale.xy;
-                float rim=exp(-x*x*0.45)*_Shock.y*1.3*saturate((sceneEye-i.scale.w)/(i.scale.z*0.5+0.5)+0.35);
+                float rim=exp(-x*x*0.45)*_Shock.y*1.3*_ShockGain*saturate((sceneEye-i.scale.w)/depthScale+0.35);
                 return float4(tex2D(_VefxGrab,uv).rgb*(1+rim)+rim*0.25,1);
             }
             ENDCG

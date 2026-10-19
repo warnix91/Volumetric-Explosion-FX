@@ -29,7 +29,7 @@ namespace VolumetricExplosionFX.Core
         public readonly double X,Y,Z,W;
         public Quat(double x,double y,double z,double w) { X=x;Y=y;Z=z;W=w; }
     }
-    [Flags] public enum ResourceKind { None=0, Fuel=1, Oxidizer=2, Cryogenic=4, Solid=8, Hypergolic=16, Electric=32, Pressurized=64, Sooty=128, Clean=256 }
+    [Flags] public enum ResourceKind { None=0, Fuel=1, Oxidizer=2, Cryogenic=4, Solid=8, Hypergolic=16, Electric=32, Pressurized=64, Sooty=128, Clean=256, Dust=512 }
     public enum PartKind { Structure, LiquidTank, Engine, SolidBooster, Battery, Capsule, Wing, Fairing, Avionics, PressurizedTank }
     public enum EventKind { Destruction, GroundImpact, WaterImpact }
     public enum Quality { Low, Medium, High, Ultra, Custom }

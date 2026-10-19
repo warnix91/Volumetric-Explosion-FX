@@ -9,7 +9,7 @@ namespace VolumetricExplosionFX.Rendering
     {
         static readonly List<Vector3> vertices=new List<Vector3>(), normals=new List<Vector3>();
         static readonly List<Vector4> uv0=new List<Vector4>(), uv1=new List<Vector4>(), uv2=new List<Vector4>(), uv3=new List<Vector4>(),
-            uv4=new List<Vector4>(), uv5=new List<Vector4>();
+            uv4=new List<Vector4>(), uv5=new List<Vector4>(), uv6=new List<Vector4>();
         static readonly List<Color32> colors=new List<Color32>();
         static readonly List<int> indices=new List<int>();
         internal const float Never=1e6f;
@@ -19,7 +19,7 @@ namespace VolumetricExplosionFX.Rendering
         internal static void Build(Mesh mesh,FractureResult cut,FragmentMotion[] motion,Quaternion toEffect,Vector3 offset,int groups,double gravity,double horizon,uint seed)
         {
             mesh.Clear();
-            vertices.Clear(); normals.Clear(); uv0.Clear(); uv1.Clear(); uv2.Clear(); uv3.Clear(); uv4.Clear(); uv5.Clear(); colors.Clear();
+            vertices.Clear(); normals.Clear(); uv0.Clear(); uv1.Clear(); uv2.Clear(); uv3.Clear(); uv4.Clear(); uv5.Clear(); uv6.Clear(); colors.Clear();
             var rnd=new SplitRandom(seed);
             var pieceSeed=new byte[cut.Count];
             for(int f=0;f<cut.Count;f++) pieceSeed[f]=Byte(rnd.Next());
@@ -38,11 +38,12 @@ namespace VolumetricExplosionFX.Rendering
                 Vector3 settle=V(m.SettleAxis)*(float)m.SettleAngle;
                 uv4.Add(new Vector4(settle.x,settle.y,settle.z,(float)m.Hop));
                 uv5.Add(new Vector4((float)m.Slide.X,(float)m.Slide.Z,(float)m.SlideTime,(float)m.LandHeight));
+                uv6.Add(new Vector4((float)m.SlopeX,(float)m.SlopeZ,0,0));
                 colors.Add(new Color32(Byte(m.Heat),Byte(m.Char),pieceSeed[f],Byte(cut.Edge[v])));
             }
             mesh.indexFormat=vertices.Count>65000?IndexFormat.UInt32:IndexFormat.UInt16;
             mesh.SetVertices(vertices); mesh.SetNormals(normals); mesh.SetUVs(0,uv0);
-            mesh.SetUVs(1,uv1); mesh.SetUVs(2,uv2); mesh.SetUVs(3,uv3); mesh.SetUVs(4,uv4); mesh.SetUVs(5,uv5); mesh.SetColors(colors);
+            mesh.SetUVs(1,uv1); mesh.SetUVs(2,uv2); mesh.SetUVs(3,uv3); mesh.SetUVs(4,uv4); mesh.SetUVs(5,uv5); mesh.SetUVs(6,uv6); mesh.SetColors(colors);
             groups=Math.Max(groups,1);
             mesh.subMeshCount=groups;
             for(int g=0;g<groups;g++)

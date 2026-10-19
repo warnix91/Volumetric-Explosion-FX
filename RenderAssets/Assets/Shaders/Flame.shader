@@ -6,7 +6,7 @@ Shader "VolumetricExplosionFX/Flame"
         _Width ("Base radius over height", Float) = 0.3
         _Rise ("Rise of the turbulence (heights per second for a 1 m flame)", Float) = 2.6
         _Intensity ("Emission", Float) = 1.35
-        _Opacity ("Occlusion of what lies behind", Float) = 0.9
+        _Opacity ("Occlusion of what lies behind", Float) = 0.8
         _Steps ("March steps", Float) = 18
     }
     SubShader
@@ -37,6 +37,7 @@ Shader "VolumetricExplosionFX/Flame"
                 float3 world:TEXCOORD0;  // point of the quad
                 float4 base:TEXCOORD1;   // flame base, height
                 float4 misc:TEXCOORD2;   // age, rise rate, seed, fade near the camera
+                float steps:TEXCOORD3;   // march steps for the flame's size on screen
             };
             v2f vert(appdata v)
             {
@@ -56,6 +57,9 @@ Shader "VolumetricExplosionFX/Flame"
                 o.world=world; o.color=v.color;
                 o.base=float4(base,h);
                 o.misc=float4(v.tc1.z,_Rise/sqrt(max(h,0.3)),v.tc1.w*61.7,saturate((dist-reach*1.05)/(reach*0.6+0.5)));
+                // Small, distant flames get fewer steps: full detail only above ~300 px on screen.
+                float pixels=2*reach*abs(UNITY_MATRIX_P[1][1])/dist*_ScreenParams.y*0.5;
+                o.steps=clamp(_Steps*sqrt(saturate(pixels/300)),6,32);
                 return o;
             }
             float3 Ramp(float t)
@@ -90,7 +94,15 @@ Shader "VolumetricExplosionFX/Flame"
                 float life=smoothstep(0,0.15,age)*(1-smoothstep(0.55,1,age))*i.color.a*i.misc.w;
                 if(life<0.003) discard;
                 float t=_Time.y*i.misc.y;
-                float steps=clamp(_Steps,6,32), dt=(t1-t0)/steps;
+                // Each flame its own kind (they looked like the same cartoon drop everywhere): slim or broad, parted
+                // into two to four tongues higher or lower, hotter and yellower or cooler, redder and sooty at the top; and it
+                // flickers.
+                float v1=frac(seed*0.1371), v2=frac(seed*0.7313), v3=frac(seed*0.4519);
+                float broad=lerp(0.72,1.5,v1), tongues=floor(2+2.99*v2), part=lerp(0.2,0.65,v3), hot=lerp(-0.2,0.14,frac(v1*1.7+v3));
+                float soot=saturate(-hot*4)*0.8;
+                float flick=0.8+0.4*tex3Dlod(_NoiseTex,float4(_Time.y*0.9+seed*0.13,seed*0.29,0.61,0)).r;
+                float3 ax=normalize(abs(up.y)<0.99?cross(up,float3(0,1,0)):cross(up,float3(1,0,0))), az=cross(up,ax);
+                float steps=min(i.steps,clamp(_Steps,6,32)), dt=(t1-t0)/steps;
                 float2 px=floor(i.pos.xy);
                 float jitter=frac(dot(px,float2(0.375,0.4375))+frac(px.y*0.5)*0.25+0.0625);
                 float3 col=0; float T=1;
@@ -104,18 +116,25 @@ Shader "VolumetricExplosionFX/Flame"
                     float3 w=(e.rgb-0.5)*(0.25+0.7*y)*0.45;
                     float3 hp=p/H+w; hp-=up*dot(hp,up);
                     float rad=length(hp);
-                    float wide=_Width*pow(saturate(1-y),0.65)*sqrt(saturate(y*6+0.05))*(0.8+0.4*e.a);
+                    float wide=_Width*broad*pow(saturate(1-y),0.65)*sqrt(saturate(y*6+0.05))*(0.8+0.4*e.a);
+                    // Tongues: above its base the flame parts round its axis, the parts wandering with the turbulence.
+                    float ang=atan2(dot(hp,az),dot(hp,ax));
+                    float tongue=0.5+0.5*cos(ang*tongues+seed*3.1+e.g*4-t*0.5);
+                    wide*=lerp(1,lerp(0.3,1.15,tongue),smoothstep(part*0.6,part+0.3,y));
                     if(rad>wide*1.5) continue;
                     float4 a=tex3D(_NoiseTex,(q+w)*1.25+0.13);
                     float4 b=tex3D(_NoiseTex,(q+w)*2.7+0.57);
                     float turb=a.r*0.6+b.g*0.4;
                     float body=saturate(1-rad/max(wide,1e-3));
-                    float shape=body*1.3-(1-turb)*(0.35+0.85*y)+(turb-0.5)*0.3;
-                    float D=saturate(shape*1.7)*life;
+                    float shape=body*1.25-(1-turb)*(0.3+0.95*y)+(turb-0.5)*0.35;
+                    float D=smoothstep(0,0.8,shape)*life;   // (softer edges: a crisp outline read as a sticker)
                     if(D<0.002) continue;
-                    float heat=D*(1.2-0.55*y)*(0.85+0.3*b.b);
-                    float absorbed=1-exp(-D*9*dt/H);
-                    col+=T*absorbed*Ramp(heat);
+                    float heat=D*(1.15-0.6*y+hot)*(0.85+0.3*b.b)*flick;
+                    float absorbed=1-exp(-D*6.5*dt/H);
+                    float3 c=Ramp(heat);
+                    // A sooty flame's cool top turns to smoke.
+                    c=lerp(c,float3(0.06,0.05,0.045),soot*smoothstep(0.45,0.95,y)*(1-saturate(heat*2.2)));
+                    col+=T*absorbed*c;
                     T*=1-absorbed;
                 }
                 float cover=1-T;
