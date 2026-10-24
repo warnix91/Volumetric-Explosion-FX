@@ -31,7 +31,9 @@ The full list is in the [changelog](CHANGELOG.md). The 1.0 look stays available 
 ## Installation
 
 1. Close KSP.
-2. Extract the release ZIP and copy `VolumetricExplosionFX` into `GameData`.
+2. Download `VolumetricExplosionFX-1.1.0.zip` from the [Releases page](https://github.com/warnix91/Volumetric-Explosion-FX/releases/latest)
+   or [SpaceDock](https://spacedock.info/mod/4652), extract it and copy `VolumetricExplosionFX` into `GameData`.
+   The green "Code" button and the "Source code" files only contain the source, not the mod itself.
 3. Launch KSP. The flame toolbar button opens the settings.
 
 No other mods are required. When updating from 1.0, replace the folder and keep
